@@ -83,34 +83,12 @@ namespace
   // HexirToLinalg RewritePatterns: Print operations
   //===----------------------------------------------------------------------===//
 
-  struct PrintOpLowering : public OpConversionPattern<hexir::PrintOp>
-  {
-    using OpConversionPattern<hexir::PrintOp>::OpConversionPattern;
-
-    LogicalResult
-    matchAndRewrite(hexir::PrintOp op, OpAdaptor adaptor,
-                    ConversionPatternRewriter &rewriter) const final
-    {
-      Value input = adaptor.getInput();
-
-      if (auto tensorType = llvm::dyn_cast<RankedTensorType>(input.getType()))
-      {
-        auto memrefType =
-            MemRefType::get(tensorType.getShape(), tensorType.getElementType());
-        Value buffer = bufferization::ToBufferOp::create(
-            rewriter, op.getLoc(), memrefType, input,
-            /*read_only=*/true);
-
-        rewriter.replaceOpWithNewOp<hexir::PrintOp>(op, buffer);
-        return success();
-      }
-
-      rewriter.modifyOpInPlace(op,
-                               [&]
-                               { op->setOperands(adaptor.getOperands()); });
-      return success();
-    }
-  };
+  // NOTE: `hexir.print` is deliberately NOT lowered here. It keeps its tensor
+  // operand through this pass and OneShotBufferize (run later with
+  // allowUnknownOps=true) inserts the tensor->memref materialization for it.
+  // Hand-rolling a `bufferization.to_buffer` at this stage left the module
+  // half-buffered, which made OneShotBufferize fail with "op was not
+  // bufferized".
 
   struct LinearOpToLinalg : public OpConversionPattern<hexir::LinearOp>
   {
@@ -132,9 +110,20 @@ namespace
       Value lhs = adaptor.getInput();  // %0
       Value rhs = adaptor.getWeight(); // %1
 
-      // Create zero-init tensor for matmul output
-      auto zeroAttr = rewriter.getZeroAttr(resultTy);
-      Value init = arith::ConstantOp::create(rewriter, loc, resultTy, zeroAttr);
+      // Zero-initialized destination for the matmul accumulation.
+      //
+      // Use tensor.empty + linalg.fill rather than an arith.constant: a
+      // constant is a read-only value, so using it as a destination-passing
+      // `outs` operand forces bufferization to emit a read-only global plus an
+      // alloc_tensor(copy) to make it writable. tensor.empty bufferizes
+      // straight to memref.alloc.
+      Value zero = arith::ConstantOp::create(
+          rewriter, loc, rewriter.getZeroAttr(resultTy.getElementType()));
+      Value empty = tensor::EmptyOp::create(rewriter, loc, resultTy.getShape(),
+                                            resultTy.getElementType());
+      Value init = linalg::FillOp::create(rewriter, loc, ValueRange{zero},
+                                         ValueRange{empty})
+                       .getResult(0);
 
       auto linear =
           linalg::MatmulOp::create(rewriter, loc,
@@ -171,9 +160,15 @@ namespace
       Value rhs = adaptor.getRhs(); // %0
       Value lhs = adaptor.getLhs(); // %1
 
-      // Create zero-init tensor for matmul output
-      auto zeroAttr = rewriter.getZeroAttr(resultTy);
-      Value init = arith::ConstantOp::create(rewriter, loc, resultTy, zeroAttr);
+      // Zero-initialized destination (see LinearOpToLinalg for why this is
+      // tensor.empty + linalg.fill and not an arith.constant).
+      Value zero = arith::ConstantOp::create(
+          rewriter, loc, rewriter.getZeroAttr(resultTy.getElementType()));
+      Value empty = tensor::EmptyOp::create(rewriter, loc, resultTy.getShape(),
+                                            resultTy.getElementType());
+      Value init = linalg::FillOp::create(rewriter, loc, ValueRange{zero},
+                                         ValueRange{empty})
+                       .getResult(0);
 
       auto add = linalg::AddOp::create(rewriter, loc,
                                        /*resultTensorTypes=*/TypeRange{resultTy},
@@ -420,11 +415,9 @@ namespace
       //     return llvm::isa<MemRefType>(type);
       //   });
       // });
-      target.addDynamicallyLegalOp<hexir::PrintOp>([](hexir::PrintOp op)
-                                                 { return llvm::all_of(op->getOperandTypes(), [](Type type)
-                                                                       { return llvm::isa<MemRefType>(type); }); });
+      target.addLegalOp<hexir::PrintOp>();
 
-      patterns.add<LinearOpToLinalg, ConstantOpToArith, PrintOpLowering,
+      patterns.add<LinearOpToLinalg, ConstantOpToArith,
                    AddOpToLinalg, ReluOpToLinalg>(ctx);
 
       if (failed(applyPartialConversion(getOperation(), target,

@@ -37,8 +37,18 @@ namespace {
 static Value buildMatmul(ConversionPatternRewriter &rewriter, Location loc,
                          Value lhs, Value rhs, RankedTensorType resultTy,
                          StringRef device) {
-  auto zeroAttr = rewriter.getZeroAttr(resultTy);
-  Value init = arith::ConstantOp::create(rewriter, loc, resultTy, zeroAttr);
+  // Zero-initialized destination for the accumulation. tensor.empty +
+  // linalg.fill, not arith.constant: a constant is read-only, so using it as a
+  // destination-passing `outs` operand makes bufferization emit a read-only
+  // global plus alloc_tensor(copy) to make it writable, which then fails to
+  // bufferize. tensor.empty becomes a plain memref.alloc.
+  Value zero = arith::ConstantOp::create(
+      rewriter, loc, rewriter.getZeroAttr(resultTy.getElementType()));
+  Value empty = tensor::EmptyOp::create(rewriter, loc, resultTy.getShape(),
+                                        resultTy.getElementType());
+  Value init =
+      linalg::FillOp::create(rewriter, loc, ValueRange{zero}, ValueRange{empty})
+          .getResult(0);
 
   auto matmul = linalg::MatmulOp::create(rewriter, loc,
                                          TypeRange{resultTy},
@@ -52,8 +62,11 @@ static Value buildMatmul(ConversionPatternRewriter &rewriter, Location loc,
 static Value buildRelu(ConversionPatternRewriter &rewriter, Location loc,
                        Value input, RankedTensorType resultTy,
                        StringRef device) {
-  auto zeroAttr = rewriter.getZeroAttr(resultTy);
-  Value init = arith::ConstantOp::create(rewriter, loc, resultTy, zeroAttr);
+  // Destination for the element-wise result. linalg.generic overwrites every
+  // element, so an uninitialized tensor.empty is sufficient here (see
+  // buildMatmul for why this must not be an arith.constant).
+  Value init = tensor::EmptyOp::create(rewriter, loc, resultTy.getShape(),
+                                       resultTy.getElementType());
 
   auto identity = rewriter.getMultiDimIdentityMap(resultTy.getRank());
   SmallVector<AffineMap, 2> indexingMaps = {identity, identity};

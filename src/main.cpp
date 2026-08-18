@@ -1,4 +1,5 @@
 
+#include "BufferizableOpInterfaceImpl.h"
 #include "Builder.h"
 #include "Dialect.h"
 #include "Jit.h"
@@ -33,6 +34,7 @@
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 
 #include "mlir/Dialect/Arith/Transforms/BufferizableOpInterfaceImpl.h"
+#include "mlir/Dialect/Bufferization/Transforms/BufferizableOpInterfaceImpl.h"
 #include "mlir/Dialect/Bufferization/Transforms/FuncBufferizableOpInterfaceImpl.h"
 #include "mlir/Dialect/Linalg/Transforms/BufferizableOpInterfaceImpl.h"
 #include "mlir/Dialect/Tensor/Transforms/BufferizableOpInterfaceImpl.h"
@@ -254,8 +256,31 @@ static int loadAndProcessMLIR(mlir::MLIRContext &context,
     // ls_cpu/ls_gpu → linalg (device attrs preserved for CudaGpuLoweringPass)
     pm.addPass(mlir::hexir::createLSTargetsToLinalgPass());
 
-    // Tensor → MemRef
-    pm.addPass(mlir::bufferization::createOneShotBufferizePass());
+    // Tensor → MemRef.
+    //
+    // allowUnknownOps: `hexir.print` has no BufferizableOpInterface, so
+    // bufferization has to be allowed to leave it in place and materialize
+    // the tensor->memref conversion at its operand instead of bailing out.
+    // unknownTypeConversion=IdentityLayoutMap: make that materialization a
+    // plain `memref<2x2xf64>` instead of a fully-dynamic strided layout,
+    // which is what hexir.print's F64MemRef constraint and the printf
+    // lowering in LowerToLLVM.cpp expect.
+    // `tensor.empty` has no bufferization of its own -- One-Shot Bufferize
+    // requires it to be rewritten to `bufferization.alloc_tensor` first,
+    // otherwise the alloc_tensor it creates mid-flight is never added to the
+    // bufferization worklist and survives as an unbufferized tensor op.
+    pm.addPass(mlir::bufferization::createEmptyTensorToAllocTensorPass());
+
+    mlir::bufferization::OneShotBufferizePassOptions bufferizeOpts;
+    // Keep allowUnknownOps=false: every tensor op in the pipeline must have a
+    // BufferizableOpInterface (hexir.print gets one from
+    // src/BufferizableOpInterfaceImpl.cpp), so a genuine gap is reported as a
+    // failure rather than silently leaving tensors in the IR.
+    bufferizeOpts.unknownTypeConversion =
+        mlir::bufferization::LayoutMapOption::IdentityLayoutMap;
+    pm.addPass(mlir::bufferization::createOneShotBufferizePass(bufferizeOpts));
+    // Fold the to_tensor/to_buffer pairs the materialization leaves behind.
+    pm.addPass(mlir::createCanonicalizerPass());
     pm.addPass(
         mlir::bufferization::createBufferDeallocationSimplificationPass());
 
@@ -465,9 +490,16 @@ static int runJit(mlir::ModuleOp module) {
   //   cmake ... -DMLIR_ENABLE_CUDA_RUNNER=ON
   // Always load runner utils; only load CUDA runtime if it exists on this
   // machine.
-  llvm::SmallVector<llvm::StringRef> sharedLibs = {
-      "/usr/local/lib/libmlir_c_runner_utils.so"};
+  // Both runtimes are optional and only present on machines where MLIR was
+  // built/installed with them. printf resolves from libc either way, so a
+  // missing c_runner_utils is not fatal -- don't hand the path to the engine
+  // if it isn't there, or it prints a spurious MemoryBuffer error.
+  llvm::SmallVector<llvm::StringRef> sharedLibs;
+  constexpr const char *runnerUtils =
+      "/usr/local/lib/libmlir_c_runner_utils.so";
   constexpr const char *cudaRuntime = "/usr/local/lib/libmlir_cuda_runtime.so";
+  if (llvm::sys::fs::exists(runnerUtils))
+    sharedLibs.push_back(runnerUtils);
   if (llvm::sys::fs::exists(cudaRuntime))
     sharedLibs.push_back(cudaRuntime);
   engineOptions.sharedLibPaths = sharedLibs;
@@ -523,6 +555,13 @@ int main(int argc, char **argv) {
   MLIRContext context(registry);
 
   // Register bufferizable op interface external models AFTER dialects loaded
+  // The bufferization dialect's own ops (notably bufferization.alloc_tensor,
+  // which `-empty-tensor-to-alloc-tensor` produces) get their
+  // BufferizableOpInterface from an external model too. Without this,
+  // alloc_tensor is not bufferizable and One-Shot Bufferize leaves it in the
+  // IR, then reports "op was not bufferized".
+  mlir::bufferization::registerBufferizableOpInterfaceExternalModels(
+      const_cast<mlir::DialectRegistry &>(context.getDialectRegistry()));
   mlir::bufferization::func_ext::registerBufferizableOpInterfaceExternalModels(
       const_cast<mlir::DialectRegistry &>(context.getDialectRegistry()));
   mlir::arith::registerBufferizableOpInterfaceExternalModels(
@@ -530,6 +569,8 @@ int main(int argc, char **argv) {
   mlir::linalg::registerBufferizableOpInterfaceExternalModels(
       const_cast<mlir::DialectRegistry &>(context.getDialectRegistry()));
   mlir::tensor::registerBufferizableOpInterfaceExternalModels(
+      const_cast<mlir::DialectRegistry &>(context.getDialectRegistry()));
+  mlir::hexir::registerBufferizableOpInterfaceExternalModels(
       const_cast<mlir::DialectRegistry &>(context.getDialectRegistry()));
 
   // Load our Dialect in this MLIR Context.

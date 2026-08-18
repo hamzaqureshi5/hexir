@@ -2,8 +2,8 @@
   <img src="assets/logo.svg" width="140" alt="Hexir logo"/>
 
   # Hexir
-
-  **A heterogeneous ML compiler built on MLIR**
+    
+  **Hexir (Heterogeneous EXecution IR) is a research MLIR compiler**
 
   *One graph in — partitioned, lowered, and executed across CPU and GPU.*
 
