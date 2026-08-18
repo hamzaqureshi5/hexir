@@ -2,6 +2,7 @@
 #include "BufferizableOpInterfaceImpl.h"
 #include "Builder.h"
 #include "Dialect.h"
+#include "Dialects/HexTIRDialect.h"
 #include "Jit.h"
 #include "LSDialects.h"
 #include "Passes.h"
@@ -181,11 +182,33 @@ static llvm::LogicalResult applyPlacementOverrides() {
 static int loadMLIR(mlir::MLIRContext &context,
                     mlir::OwningOpRef<mlir::ModuleOp> &module) {
 
-  // CREATE MODULE FIRST
-  module = mlir::ModuleOp::create(mlir::UnknownLoc::get(&context));
-
   context.getOrLoadDialect<mlir::func::FuncDialect>();
   context.getOrLoadDialect<mlir::hexir::HexirDialect>();
+
+  // If an input file was given, compile that. Otherwise fall back to the
+  // program built in C++ by Builder.cpp, which is what the emit-stage tests
+  // exercise. Without this branch `inputFilename` was parsed but never read,
+  // so there was no way to feed the compiler any IR -- including new dialects.
+  if (inputFilename != "-") {
+    llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> fileOrErr =
+        llvm::MemoryBuffer::getFileOrSTDIN(inputFilename);
+    if (std::error_code ec = fileOrErr.getError()) {
+      llvm::errs() << "error: could not open " << inputFilename << ": "
+                   << ec.message() << "\n";
+      return -1;
+    }
+    llvm::SourceMgr sourceMgr;
+    sourceMgr.AddNewSourceBuffer(std::move(*fileOrErr), llvm::SMLoc());
+    module = mlir::parseSourceFile<mlir::ModuleOp>(sourceMgr, &context);
+    if (!module) {
+      llvm::errs() << "error: could not parse " << inputFilename << "\n";
+      return -1;
+    }
+    return 0;
+  }
+
+  // CREATE MODULE FIRST
+  module = mlir::ModuleOp::create(mlir::UnknownLoc::get(&context));
 
   createMLPLinearFunction(context, *module);
   // createMLPAddFunction(context, *module);
@@ -541,7 +564,8 @@ int main(int argc, char **argv) {
                   mlir::affine::AffineDialect, mlir::math::MathDialect,
                   mlir::LLVM::LLVMDialect, mlir::cf::ControlFlowDialect,
                   mlir::bufferization::BufferizationDialect,
-                  mlir::ls_cpu::LSCPUDialect, mlir::ls_gpu::LSGPUDialect>();
+                  mlir::ls_cpu::LSCPUDialect, mlir::ls_gpu::LSGPUDialect,
+                  mlir::hextir::HexTIRDialect>();
 
   // Register dialect extensions BEFORE constructing the context so they are
   // visible to passes that query ConvertToLLVMPatternInterface.
@@ -577,6 +601,7 @@ int main(int argc, char **argv) {
   context.getOrLoadDialect<mlir::hexir::HexirDialect>();
   context.getOrLoadDialect<mlir::ls_cpu::LSCPUDialect>();
   context.getOrLoadDialect<mlir::ls_gpu::LSGPUDialect>();
+  context.getOrLoadDialect<mlir::hextir::HexTIRDialect>();
   context.loadAllAvailableDialects();
 
   mlir::OwningOpRef<mlir::ModuleOp> module;

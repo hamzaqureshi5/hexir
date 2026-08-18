@@ -5,6 +5,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "Dialect.h"
+#include "Dialects/HexTIRDialect.h"
 
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/Builders.h"
@@ -467,6 +468,30 @@ ParseResult MishOp::parse(OpAsmParser &parser, OperationState &result) {
 }
 
 void MishOp::print(OpAsmPrinter &p) { printUnaryOp(p, *this); }
+
+//===----------------------------------------------------------------------===//
+// CallTIROp
+//===----------------------------------------------------------------------===//
+
+llvm::LogicalResult
+CallTIROp::verifySymbolUses(mlir::SymbolTableCollection &symbolTable) {
+  auto callee = symbolTable.lookupNearestSymbolFrom<mlir::hextir::PrimFuncOp>(
+      *this, getCalleeAttr());
+  if (!callee)
+    return emitOpError() << "'" << getCallee()
+                         << "' does not reference a valid hextir.prim_func";
+
+  // A prim func is destination-passing: one buffer per tensor argument, plus
+  // one for the result the call materializes.
+  size_t expected = getArgs().size() + 1;
+  if (callee.getNumArguments() != expected)
+    return emitOpError() << "expected @" << getCallee() << " to take "
+                         << expected << " buffers (" << getArgs().size()
+                         << " inputs + 1 destination), but it takes "
+                         << callee.getNumArguments();
+
+  return mlir::success();
+}
 
 //===----------------------------------------------------------------------===//
 // FuncOp

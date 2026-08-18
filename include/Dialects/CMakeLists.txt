@@ -16,6 +16,13 @@ mlir_tablegen(LSGPUDialect.h.inc -gen-dialect-decls -dialect=ls_gpu)
 mlir_tablegen(LSGPUDialect.cpp.inc -gen-dialect-defs -dialect=ls_gpu)
 add_public_tablegen_target(LSDialectsIncGen)
 
+set(LLVM_TARGET_DEFINITIONS HexTIROps.td)
+mlir_tablegen(HexTIROps.h.inc -gen-op-decls)
+mlir_tablegen(HexTIROps.cpp.inc -gen-op-defs)
+mlir_tablegen(HexTIRDialect.h.inc -gen-dialect-decls -dialect=hextir)
+mlir_tablegen(HexTIRDialect.cpp.inc -gen-dialect-defs -dialect=hextir)
+add_public_tablegen_target(HexTIRIncGen)
+
 # Most dialects should use add_mlir_interfaces().
 set(LLVM_TARGET_DEFINITIONS ShapeInferenceInterface.td)
 mlir_tablegen(ShapeInferenceOpInterfaces.h.inc -gen-op-interface-decls)

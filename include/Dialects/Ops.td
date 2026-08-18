@@ -412,6 +412,44 @@ def FuncOp : Hexir_Op<"func", [
 
 
 //===----------------------------------------------------------------------===//
+// CallTIROp
+//===----------------------------------------------------------------------===//
+
+def CallTIROp : Hexir_Op<"call_tir", [
+    DeclareOpInterfaceMethods<SymbolUserOpInterface>
+  ]> {
+  let summary = "call a hextir.prim_func, materializing its result as a tensor";
+  let description = [{
+    The bridge from the graph level down to the kernel level, and the only way
+    to reach `hextir`.
+
+    The two levels disagree about semantics on purpose: `hexir` is on tensors
+    with value semantics, while a `hextir.prim_func` is destination-passing over
+    buffers and returns nothing. `call_tir` is where that gap is crossed -- it
+    names the result *type* here, and bufferization later turns that type into
+    the destination buffer argument the callee actually expects.
+
+    So the callee takes one buffer per argument, plus one for the destination:
+
+    ```mlir
+    %r = hexir.call_tir @matmul(%a, %b)
+         : (tensor<2x2xf64>, tensor<2x2xf64>) -> tensor<2x2xf64>
+
+    hextir.prim_func @matmul(%a: memref<2x2xf64>,
+                             %b: memref<2x2xf64>,
+                             %dst: memref<2x2xf64>) { ... }
+    ```
+  }];
+
+  let arguments = (ins FlatSymbolRefAttr:$callee, Variadic<F64Tensor>:$args);
+  let results = (outs F64Tensor:$result);
+
+  let assemblyFormat = [{
+    $callee `(` $args `)` attr-dict `:` functional-type($args, $result)
+  }];
+}
+
+//===----------------------------------------------------------------------===//
 // PrintOp
 //===----------------------------------------------------------------------===//
 

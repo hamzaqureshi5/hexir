@@ -58,7 +58,7 @@ add_executable(hexir ${CCMLIR_SRC})
 
 
 # add_dependencies(hexir Ops ShapeInfer CombineIncGen)
-add_dependencies(hexir OpsIncGen LSDialectsIncGen
+add_dependencies(hexir OpsIncGen LSDialectsIncGen HexTIRIncGen
                  ShapeInferenceInterfaceIncGen CombineIncGen)
 
 llvm_update_compile_flags(hexir)
