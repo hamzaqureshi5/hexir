@@ -98,8 +98,7 @@ struct MaterializeLSTargetsPass
     patterns.add<LinalgAddToLS, LinalgMatmulToLS, LinalgGenericToLSRelu>(
         &getContext());
 
-    if (failed(applyPatternsAndFoldGreedily(getOperation(),
-                                            std::move(patterns))))
+    if (failed(applyPatternsGreedily(getOperation(), std::move(patterns))))
       signalPassFailure();
   }
 };

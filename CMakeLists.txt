@@ -4,8 +4,10 @@ project(hexir LANGUAGES CXX C)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED YES)
 
-set(LLVM_DIR "/home/hamza/Repos/llvm-project/build/lib/cmake/llvm")
-set(MLIR_DIR "/home/hamza/Repos/llvm-project/build/lib/cmake/mlir")
+
+
+set(LLVM_DIR "/home/user/llvm-project/build/lib/cmake/llvm")
+set(MLIR_DIR "/home/user/llvm-project/build/lib/cmake/mlir")
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
