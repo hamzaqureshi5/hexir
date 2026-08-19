@@ -60,7 +60,17 @@ struct PrintOpInterface
     if (failed(buffer))
       return failure();
 
-    replaceOpWithNewBufferizedOp<hexir::PrintOp>(rewriter, printOp, *buffer);
+    // Carry the attributes across. replaceOpWithNewBufferizedOp builds a fresh
+    // op, so anything not passed as an operand is dropped -- including
+    // `device`, which every later pass relies on to know where this op was
+    // placed. Losing placement silently at the tensor-to-buffer boundary is
+    // exactly the failure mode the mirror dialects used to have.
+    auto attrs = printOp->getAttrs();
+    auto newOp = replaceOpWithNewBufferizedOp<hexir::PrintOp>(rewriter, printOp,
+                                                              *buffer);
+    for (mlir::NamedAttribute attr : attrs)
+      if (!newOp->hasAttr(attr.getName()))
+        newOp->setAttr(attr.getName(), attr.getValue());
     return success();
   }
 };

@@ -244,6 +244,11 @@ shows up as the unhelpful `error: op was not bufferized` with no location, becau
 `--mlir-print-ir-after-failure` and look for what still has tensor operands — `to_tensor` and
 `to_buffer` are allowed in the output, anything else is the culprit.
 
+`PrintOpInterface::bufferize` copies the op's attributes onto the op it creates.
+`replaceOpWithNewBufferizedOp` builds a fresh op, so anything not passed as an operand is dropped
+— including `device`, which every later pass needs. Any rewrite that rebuilds an op must carry
+attributes across; that failure mode is what made the old mirror dialects lossy.
+
 Do not hand-roll `bufferization.to_buffer` in an earlier pass to "pre-bufferize" an op: a module
 that reaches One-Shot Bufferize already half-buffered is what caused that error historically.
 Give the op an interface instead. Related: never use an `arith.constant` as a destination-passing
@@ -269,8 +274,11 @@ rewrites — currently all patterns are commented out; only `ConstantOp::fold` i
 - **Do not write a FileCheck prefix followed by a colon in test prose.** A comment like
   `// Everything on the CPU: ...` in a test using `--check-prefix=CPU` is parsed as a directive
   and fails with a confusing "expected string not found in input".
-- `UNSUPPORTED` cannot be used as a FileCheck prefix — it is a reserved lit directive, and a test
-  using it fails as UNRESOLVED with a confusing parse error. Same for `REQUIRES` and `XFAIL`.
+- **Never write a lit directive name followed by a colon in test prose.** `UNSUPPORTED:`,
+  `REQUIRES:` and `XFAIL:` are parsed wherever they appear, including inside an explanatory
+  comment, and the test fails as UNRESOLVED with a confusing parse error. The same applies to a
+  FileCheck prefix: `// Everything on the CPU: ...` in a test using `--check-prefix=CPU` is read as
+  a directive.
 - Tests asserting a non-zero exit need `not` in front of the command, or lit fails the RUN line
   itself. `%hexir-run` is registered in `lit.cfg.py` *before* `%hexir`, since lit applies
   substitutions in list order and the shorter pattern would otherwise eat the longer one.
