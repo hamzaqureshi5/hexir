@@ -16,6 +16,7 @@ add_library(hexir_runtime STATIC
   src/status.c
   src/hal/hal.c
   src/hal/cpu/cpu_device.c
+  src/hal/cuda/cuda_device.c
   src/module/module.c
   src/vm/interpreter.c
   src/kernels/reference_kernels.c)
@@ -25,6 +26,9 @@ target_include_directories(hexir_runtime
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 target_compile_options(hexir_runtime PRIVATE -Wall -Wextra)
+# libcuda is dlopened, never linked, so the runtime still builds and runs on a
+# machine with no CUDA. Only libdl is needed.
+target_link_libraries(hexir_runtime PUBLIC ${CMAKE_DL_LIBS})
 
 add_executable(hexir-run tools/hexir-run/hexir-run.c)
 target_link_libraries(hexir-run PRIVATE hexir_runtime)

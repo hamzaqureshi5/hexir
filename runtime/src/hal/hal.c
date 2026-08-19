@@ -13,9 +13,7 @@ hexir_status_t hexir_device_create(hexir_device_kind_t kind,
   case HEXIR_DEVICE_CPU:
     return hexir_cpu_device_create(out_device);
   case HEXIR_DEVICE_CUDA:
-    /* src/hal/cuda/ -- driver API (libcuda), dlopened, so a build without a
-       CUDA toolkit still runs everything on the CPU. */
-    return HEXIR_ERROR_UNIMPLEMENTED;
+    return hexir_cuda_device_create(out_device);
   }
   return HEXIR_ERROR_INVALID_ARGUMENT;
 }
@@ -26,7 +24,9 @@ void hexir_device_release(hexir_device_t *device) {
 }
 
 const char *hexir_device_name(const hexir_device_t *device) {
-  return device ? device->vtable->name : "(null)";
+  if (!device)
+    return "(null)";
+  return device->name[0] ? device->name : device->vtable->name;
 }
 
 hexir_device_kind_t hexir_device_kind(const hexir_device_t *device) {

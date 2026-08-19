@@ -87,10 +87,26 @@ Buffers declare where they live — `HOST_LOCAL`, `DEVICE_LOCAL` or
 runtime: a `DEVICE_LOCAL` buffer needs an explicit transfer, a `HOST_VISIBLE`
 one does not.
 
-Only the CPU backend is written. Adding CUDA means adding one vtable in
-`runtime/src/hal/cuda/` and touching no caller. It should use the driver API
-(`libcuda`) rather than the CUDA runtime API, so it can be loaded dynamically
-and a build without a toolkit still works.
+Two backends exist. `cpu/` is malloc and memcpy. `cuda/` is real device memory
+through the driver API: `cuMemAlloc`, `cuMemcpyHtoD`, `cuMemcpyDtoH`,
+`cuCtxSynchronize`.
+
+`libcuda` is **dlopened, never linked**, and the symbols are looked up by hand,
+so the runtime still builds and runs on a machine with no CUDA at all — asking
+for a CUDA device there fails with a message rather than failing to load. That
+is also why the backend declares the few driver types it needs instead of
+including `cuda.h`: no CUDA build dependency, only a runtime one.
+
+```
+$ hexir-run --selftest --device=cuda
+device        : cuda (NVIDIA GeForce GTX 1660 Ti)
+hal roundtrip : ok (32 bytes)
+```
+
+A CUDA buffer is `DEVICE_LOCAL`, so `hexir_buffer_host_pointer` returns NULL
+and callers must use write/read. Those two calls **are** the host-to-device and
+device-to-host transfers, which is why the artifact path gets transfers for
+free where the JIT path does not.
 
 ## Placement is checked
 
@@ -116,7 +132,19 @@ testable end to end.
 So a `.hxb` file today is portable, and its numbers are correct and match the
 JIT exactly, but it is **not yet carrying compiled code**. Putting a CUBIN from
 `gpu.binary` in that section, or a host object file, replaces the descriptions
-without changing the file format or the command list. That is the next step.
+without changing the file format or the command list.
+
+This is what now stops a GPU run. Given a cuda module and a cuda device the
+runtime allocates on the device and transfers the constants, then stops:
+
+```
+hexir-run: kernel 'linear_0' is placed on cuda, but the module carries a kernel
+descriptor rather than device code, and there is nothing to launch
+```
+
+The compiler can already produce the missing piece — `-emit=mlir-llvm` with a
+cuda placement emits a `gpu.binary` holding a CUBIN that `ptxas` compiled. It
+is not yet routed into the artifact.
 :::
 
 ## Commands

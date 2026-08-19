@@ -97,8 +97,17 @@ static hexir_status_t vm_dispatch(vm_state_t *vm, const uint64_t *operands,
     if (!buffer)
       return HEXIR_ERROR_INVALID_MODULE;
     args[i] = (double *)hexir_buffer_host_pointer(buffer);
-    if (!args[i])
-      return HEXIR_ERROR_DEVICE;
+    if (!args[i]) {
+      /* Device-local memory, and the reference kernels run on the host. The
+         way out is not to map this buffer back: it is for EXECUTABLES to carry
+         real device code (a CUBIN from gpu.binary) that the HAL launches. */
+      fprintf(stderr,
+              "hexir-run: kernel '%s' is placed on %s, but the module carries "
+              "a kernel descriptor rather than device code, and there is "
+              "nothing to launch\n",
+              exe->name, exe->device == 1 ? "cuda" : "cpu");
+      return HEXIR_ERROR_UNIMPLEMENTED;
+    }
   }
 
   size_t elems = (size_t)exe->m * exe->n;

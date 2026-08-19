@@ -21,6 +21,18 @@
 // RUN: not %hexir-run --quiet %t.cuda.hxb 2>&1 | FileCheck %s --check-prefix=MISPLACED
 // MISPLACED: placed on cuda but the active device is cpu
 
+// The CUDA backend is real: it allocates on the device, copies host to device
+// and back, and reports the actual GPU. Gated because it needs a working
+// driver, which a CPU-only machine will not have.
+// RUN: %hexir-run --selftest --device=cuda 2>&1 | FileCheck %s --check-prefix=CUDAHAL
+// CUDAHAL: device        : cuda
+// CUDAHAL: hal roundtrip : ok
+
+// A cuda module on a cuda device gets past placement, allocates and transfers,
+// then stops at dispatch: EXECUTABLES holds a descriptor, not device code.
+// RUN: not %hexir-run --quiet --device=cuda %t.cuda.hxb 2>&1 | FileCheck %s --check-prefix=NOCODE
+// NOCODE: rather than device code
+
 // The HAL works without any module at all.
 // RUN: %hexir-run --selftest | FileCheck %s --check-prefix=SELFTEST
 // SELFTEST: device        : cpu

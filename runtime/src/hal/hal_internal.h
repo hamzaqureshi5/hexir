@@ -25,6 +25,9 @@ struct hexir_device_t {
   const hexir_device_vtable_t *vtable;
   hexir_device_kind_t kind;
   void *impl;
+  /* Optional, more specific than vtable->name: the CUDA backend fills in the
+     actual GPU so output says which card ran the work. */
+  char name[128];
 };
 
 struct hexir_buffer_t {
@@ -35,5 +38,6 @@ struct hexir_buffer_t {
 };
 
 hexir_status_t hexir_cpu_device_create(hexir_device_t **out_device);
+hexir_status_t hexir_cuda_device_create(hexir_device_t **out_device);
 
 #endif // HEXIR_RUNTIME_HAL_INTERNAL_H
