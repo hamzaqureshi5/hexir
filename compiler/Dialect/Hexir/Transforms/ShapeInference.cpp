@@ -10,7 +10,6 @@
 #include "hexir/Dialect/Hexir/IR/HexirDialect.h"
 #include "hexir/Conversion/Passes.h"
 #include "hexir/Dialect/Hexir/Transforms/Passes.h"
-#include "hexir/Dialect/LS/Transforms/Passes.h"
 #include "hexir/Dialect/Hexir/IR/ShapeInferenceInterface.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Operation.h"

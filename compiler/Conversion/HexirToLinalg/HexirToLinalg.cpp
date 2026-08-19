@@ -1,7 +1,6 @@
 #include "hexir/Dialect/Hexir/IR/HexirDialect.h"
 #include "hexir/Conversion/Passes.h"
 #include "hexir/Dialect/Hexir/Transforms/Passes.h"
-#include "hexir/Dialect/LS/Transforms/Passes.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Bufferization/Transforms/Passes.h"

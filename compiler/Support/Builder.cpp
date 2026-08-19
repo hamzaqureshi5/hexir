@@ -2,7 +2,6 @@
 #include "hexir/Dialect/Hexir/IR/HexirDialect.h"
 #include "hexir/Conversion/Passes.h"
 #include "hexir/Dialect/Hexir/Transforms/Passes.h"
-#include "hexir/Dialect/LS/Transforms/Passes.h"
 #include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
 #include "mlir/Conversion/LinalgToStandard/LinalgToStandard.h"
 #include "mlir/Conversion/VectorToSCF/VectorToSCF.h"

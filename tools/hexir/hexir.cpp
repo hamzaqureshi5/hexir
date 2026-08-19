@@ -3,12 +3,10 @@
 #include "hexir/Support/Builder.h"
 #include "hexir/Dialect/Hexir/IR/HexirDialect.h"
 #include "hexir/Dialect/HexTIR/IR/HexTIRDialect.h"
-#include "hexir/Dialect/LS/IR/LSDialects.h"
 #include "hexir/Conversion/Passes.h"
 #include "hexir/Pipelines/Pipelines.h"
 #include "hexir/Serialization/ModuleSerializer.h"
 #include "hexir/Dialect/Hexir/Transforms/Passes.h"
-#include "hexir/Dialect/LS/Transforms/Passes.h"
 #include "hexir/Target/TargetInfo.h"
 
 #include "mlir/IR/BuiltinOps.h"
@@ -383,7 +381,6 @@ int main(int argc, char **argv) {
                   mlir::affine::AffineDialect, mlir::math::MathDialect,
                   mlir::LLVM::LLVMDialect, mlir::cf::ControlFlowDialect,
                   mlir::bufferization::BufferizationDialect,
-                  mlir::ls_cpu::LSCPUDialect, mlir::ls_gpu::LSGPUDialect,
                   mlir::hextir::HexTIRDialect>();
 
   // Register dialect extensions BEFORE constructing the context so they are
@@ -418,8 +415,6 @@ int main(int argc, char **argv) {
 
   // Load our Dialect in this MLIR Context.
   context.getOrLoadDialect<mlir::hexir::HexirDialect>();
-  context.getOrLoadDialect<mlir::ls_cpu::LSCPUDialect>();
-  context.getOrLoadDialect<mlir::ls_gpu::LSGPUDialect>();
   context.getOrLoadDialect<mlir::hextir::HexTIRDialect>();
   context.loadAllAvailableDialects();
 

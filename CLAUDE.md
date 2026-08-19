@@ -146,7 +146,7 @@ Tests that need the CUDA toolkit are gated `REQUIRES: cuda` (lit enables that fe
 ./build/hexir -emit=hxb -o m.hxb    # loadable module for the runtime
 ./build/hexir-run m.hxb             # run it, with no MLIR/LLVM in the process
 ./build/hexir -emit=mlir-linalg     # after LowerToLinalg
-./build/hexir -emit=mlir-hetero     # after Partition + MaterializeLSTargets (ls_cpu/ls_gpu ops)
+./build/hexir -emit=mlir-hetero     # after Partition (linalg ops carrying `device`)
 ./build/hexir -emit=mlir-gpu        # cuda partitions as gpu.launch
 ./build/hexir -emit=mlir-llvm       # LLVM dialect
 ./build/hexir -emit=llvm            # translated LLVM IR
@@ -192,10 +192,10 @@ Pass order and the files implementing each:
    LLVM stage.
 4. `hexir-partition` again — fallback for linalg ops with no inherited `device` (the pass skips
    any op that already has the attr, so propagated placement wins)
-5. `hexir-materialize-ls-targets` (`Dialect/LS/Transforms/MaterializeLSTargets.cpp`) — rewrites linalg ops into
-   `ls_cpu.*`/`ls_gpu.*` model ops purely so placement is visible in the IR
-6. `ls-lower-to-linalg` (`Conversion/LSToLinalg/`) — converts them straight back to linalg,
-   preserving `device`
+5. `-emit=mlir-hetero` stops here: linalg carrying `device` attributes. A detour through
+   mirror `ls_cpu`/`ls_gpu` ops used to exist purely to show placement in the op name; it was
+   removed because the round trip rebuilt each op, dropping its `outs` operand and every
+   attribute but `device`
 7. `empty-tensor-to-alloc-tensor` → `one-shot-bufferize`
    (`unknownTypeConversion=IdentityLayoutMap`) → `canonicalize` → buffer-dealloc
    simplification (tensor → memref). The order matters: `tensor.empty` has no
@@ -212,7 +212,7 @@ Pass order and the files implementing each:
 11. `convert-scf-to-cf` → `hexir-to-llvm` (`Conversion/HexirToLLVM/`, also lowers `hexir.print` to
     `printf` calls) → `reconcile-unrealized-casts` → LLVM DI scopes
 
-Dialects (three of them):
+Dialects (two of them):
 
 - `hexir` — `include/hexir/Dialect/Hexir/IR/HexirOps.td` + `compiler/Dialect/Hexir/IR/HexirDialect.cpp`. Frontend NN ops. Many ops
   (`sigmoid`, `softmax`, `gelu`, `swish`, `mish`, `tanh`, `elu`, `leaky_relu`) are *declared in
@@ -227,10 +227,6 @@ Dialects (three of them):
   and hands loop nests to `scf`/`memref`/`gpu` rather than reimplementing a scheduling language.
   Produced by `hexir-lower-to-tir` (`-emit=mlir-tir`). Nothing lowers *out* of it yet, so that
   stage is terminal.
-- `ls_cpu` / `ls_gpu` — `include/hexir/Dialect/LS/IR/LSDialects.td` + `compiler/Dialect/LS/IR/LSDialects.cpp`.
-  Mirror-image `add`/`mul`/`matmul`/`relu` ops that exist only to make placement legible in
-  `-emit=mlir-hetero`. Adding an op means adding it to *both* dialects plus a pattern in
-  `MaterializeLSTargets.cpp` and `LowerLSToLinalg.cpp`.
 
 Placement registry: `compiler/Target/TargetInfo.cpp` — a singleton `TargetSupport` mapping op names to
 supported targets (`opSupports_`) and a preferred target (`opPreferred_`). `"gpu"` normalizes to
@@ -263,18 +259,13 @@ rewrites — currently all patterns are commented out; only `ConstantOp::fold` i
 
 - **5 of 14 checked-in tests fail (all in the compiler suite; the runtime suite is green), for two reasons unrelated to the compiler.**
   `TargetInfo.cpp` sets `opPreferred_["hexir.linear"] = "cpu"` (with a comment claiming GPU), and
-  the relu call in `createMLPLinearFunction` is commented out — so `-emit=mlir-hetero` emits
-  `ls_cpu.matmul` and no relu, while `partition-hetero.mlir`, `placement-flag.mlir`
-  (DEFAULT/SWAP/ALLGPU), `hexir-dialect.mlir`, `lower-to-linalg.mlir`, and `cuda-to-gpu.mlir`
-  expect `ls_gpu.matmul` and a relu. Restoring the relu fixes the first two; flipping the default
-  to `cuda` fixes the rest but makes plain `-emit=jit` require a CUDA toolkit.
-  Passing: `jit-cpu`, `hextir-roundtrip`, `lower-to-tir`, `hxb-roundtrip`, `hxb-vs-jit`,
-  `hxb-errors`. The other 3 are `REQUIRES: cuda` and report as unsupported.
-- **`LSToLinalg` has no pattern for `ls_cpu.add`/`ls_gpu.add`.** `MaterializeLSTargets` creates
-  them from `linalg.add`, and nothing converts them back, so any program containing `hexir.add`
-  fails at `-emit=mlir-gpu` and beyond with "failed to legalize operation 'ls_cpu.add'". Pre-existing;
-  the `-emit=hxb` path does not go through the mirror dialects and handles `add` fine. This is the
-  maintenance cost of mirroring every op into two dialects plus two patterns.
+  the relu call in `createMLPLinearFunction` is commented out. Both remaining causes bite only the
+  tests that compile the *built-in* program rather than their own input file:
+  `hexir-dialect.mlir` and `lower-to-linalg.mlir` expect a relu that is not built, and
+  `cuda-to-gpu.mlir` expects `gpu.launch` by default. The fix used for `partition-hetero.mlir` and
+  `placement-flag.mlir` applies: give the test its own `%s` input and pass `-placement` explicitly.
+  Passing: `jit-cpu`, `hextir-roundtrip`, `lower-to-tir`, `partition-hetero`, `placement-flag`,
+  plus all 3 runtime tests. The other 3 are `REQUIRES: cuda` and report as unsupported.
 - **Do not write a FileCheck prefix followed by a colon in test prose.** A comment like
   `// Everything on the CPU: ...` in a test using `--check-prefix=CPU` is parsed as a directive
   and fails with a confusing "expected string not found in input".

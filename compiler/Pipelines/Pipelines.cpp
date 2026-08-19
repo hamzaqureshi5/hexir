@@ -10,7 +10,6 @@
 #include "hexir/Conversion/Passes.h"
 #include "hexir/Dialect/Hexir/IR/HexirDialect.h"
 #include "hexir/Dialect/Hexir/Transforms/Passes.h"
-#include "hexir/Dialect/LS/Transforms/Passes.h"
 
 #include "mlir/Dialect/Bufferization/Transforms/Passes.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
@@ -87,14 +86,14 @@ void mlir::hexir::buildHexirPipeline(PassManager &pm,
     // Second run: fallback for linalg ops that did not inherit a device attr
     // (PartitionPass skips ops already annotated).
     pm.addPass(mlir::hexir::createPartitionPass());
-    // Materialize placement as ls_cpu/ls_gpu model ops so it is visible.
-    pm.addPass(mlir::hexir::createMaterializeLSTargetsPass());
   }
+  // -emit=mlir-hetero stops here and prints linalg carrying `device`. There
+  // used to be a detour through mirror ls_cpu/ls_gpu ops purely to show
+  // placement in the op name; it was a lossy round trip -- rebuilding each op
+  // dropped its outs operand and every attribute but `device` -- and printing
+  // the real linalg op says strictly more.
   if (stage == Stage::Hetero)
     return;
-
-  // ls_cpu/ls_gpu -> linalg (device attrs preserved for the GPU lowering).
-  pm.addPass(mlir::hexir::createLSTargetsToLinalgPass());
 
   //===--------------------------------------------------------------------===//
   // Tensor -> MemRef

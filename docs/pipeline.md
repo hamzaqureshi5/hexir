@@ -16,9 +16,7 @@ flowchart TD
     T -->|linalg and beyond| L1["partition"]
     L1 --> L2["lower-to-linalg"]
     L2 --> L3["partition again<br/><i>safety net</i>"]
-    L3 --> L4["materialize ls_cpu / ls_gpu"]
-    L4 --> L5["back to linalg"]
-    L5 --> L6["bufferize<br/><i>tensors become memrefs</i>"]
+    L3 --> L6["bufferize<br/><i>tensors become memrefs</i>"]
     L6 --> L7["cuda ops to gpu.launch"]
     L7 --> L8["linalg to loops"]
     L8 --> L9["outline kernels, NVVM, CUBIN"]
@@ -70,12 +68,12 @@ nothing lowers `hextir` further yet.
 `arith.constant`. Every pattern copies the `device` attribute onto whatever it
 creates.
 
-### The visible-placement detour
+### Placement is visible without a detour
 
-`hexir-materialize-ls-targets` turns linalg ops into `ls_cpu.*` / `ls_gpu.*`
-mirror ops, and `ls-lower-to-linalg` turns them straight back. This exists only
-so `-emit=mlir-hetero` shows placement in the op names. See the note at the end
-of [The two IRs](ir-levels.md) about why it is going away.
+`-emit=mlir-hetero` prints linalg ops carrying their `device` attribute. Mirror
+`ls_cpu` / `ls_gpu` dialects used to exist so placement appeared in the op name;
+they were removed because the round trip through them rebuilt each op and lost
+its destination operand and attributes.
 
 ### Bufferization
 

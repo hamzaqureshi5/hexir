@@ -1,8 +1,0 @@
-set(LLVM_TARGET_DEFINITIONS LSDialects.td)
-mlir_tablegen(LSDialectsOps.h.inc -gen-op-decls)
-mlir_tablegen(LSDialectsOps.cpp.inc -gen-op-defs)
-mlir_tablegen(LSCPUDialect.h.inc -gen-dialect-decls -dialect=ls_cpu)
-mlir_tablegen(LSCPUDialect.cpp.inc -gen-dialect-defs -dialect=ls_cpu)
-mlir_tablegen(LSGPUDialect.h.inc -gen-dialect-decls -dialect=ls_gpu)
-mlir_tablegen(LSGPUDialect.cpp.inc -gen-dialect-defs -dialect=ls_gpu)
-add_public_tablegen_target(LSDialectsIncGen)

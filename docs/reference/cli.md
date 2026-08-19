@@ -18,7 +18,7 @@ With no input file, the compiler builds a small program in C++
 | `hxb` | a loadable module (see `-o`) |
 | `mlir-affine` | *accepted, but no affine pass is wired up* |
 | `mlir-linalg` | after lowering to linalg on tensors |
-| `mlir-hetero` | placement shown as `ls_cpu` / `ls_gpu` ops |
+| `mlir-hetero` | linalg ops carrying their `device` attribute |
 | `mlir-gpu` | CUDA-placed ops as `gpu.launch` |
 | `mlir-llvm` | the LLVM dialect |
 | `llvm` | translated LLVM IR |

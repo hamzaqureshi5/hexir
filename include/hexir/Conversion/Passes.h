@@ -29,9 +29,6 @@ std::unique_ptr<Pass> createLowerToAffinePass();
 /// Remaining hexir ops (and hexir.print) -> LLVM dialect.
 std::unique_ptr<Pass> createLowerToLLVMPass();
 
-/// ls_cpu/ls_gpu -> linalg, preserving `device`.
-std::unique_ptr<Pass> createLSTargetsToLinalgPass();
-
 /// linalg ops placed on "cuda" -> gpu.launch.
 std::unique_ptr<Pass> createCudaGpuLoweringPass();
 

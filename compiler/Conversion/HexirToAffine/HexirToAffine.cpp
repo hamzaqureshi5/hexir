@@ -15,7 +15,6 @@
 #include "hexir/Dialect/Hexir/IR/HexirDialect.h"
 #include "hexir/Conversion/Passes.h"
 #include "hexir/Dialect/Hexir/Transforms/Passes.h"
-#include "hexir/Dialect/LS/Transforms/Passes.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinDialect.h"
 #include "mlir/IR/BuiltinOps.h"

@@ -73,8 +73,3 @@ it rather than restructuring the loop nest.
   anyone having to match on its body. The `.hxb` serializer turns this into a
   descriptor.
 
-## ls_cpu and ls_gpu
-
-Mirror-image `add`, `mul`, `matmul` and `relu` ops that exist only so
-`-emit=mlir-hetero` shows placement in the op name. Scheduled for removal —
-see [The two IRs](../ir-levels.md).
