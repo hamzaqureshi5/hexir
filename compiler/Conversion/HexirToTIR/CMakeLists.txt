@@ -1,0 +1,1 @@
+hexir_library(HexirToTIR HexirToTIR.cpp DEPENDS HexirOpsIncGen HexTIROpsIncGen)
