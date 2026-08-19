@@ -15,7 +15,7 @@ import struct
 import sys
 
 MAGIC = b"HEXIRMOD"
-VERSION = 2
+VERSION = 3
 
 SECTION_KIND = {1: "symbols", 2: "program", 3: "rodata", 4: "executables"}
 KERNEL_KIND = {1: "matmul", 2: "add", 3: "relu"}
@@ -34,8 +34,9 @@ HEADER = "<8sIIII"                  # magic, version, flags, count, reserved
 SECTION = "<IIQQ"                   # kind, flags, offset, size
 SYMBOL = "<32sII"                   # name, program_offset, reserved
 EXEC_HEADER = "<II"                 # count, reserved
-EXEC_ENTRY = "<32sIIIIIIIIIII"      # name, kind, device, m, n, k, elem_size,
-                                    # image_offset, image_size, grid, block, _
+EXEC_ENTRY = "<32sIIIIIIIIIIII"     # name, kind, device, m, n, k, elem_size,
+                                    # image_offset, image_size,
+                                    # grid_x, grid_y, block_x, block_y
 
 
 def die(message):
@@ -152,15 +153,17 @@ def main():
         print("\nexecutables  (%d)" % count)
         for i in range(count):
             (name, kind, device, m, n, k, elem, image_offset, image_size,
-             grid, block, _) = struct.unpack_from(EXEC_ENTRY, data, base + i * size)
+             grid_x, grid_y, block_x, block_y) = struct.unpack_from(
+                 EXEC_ENTRY, data, base + i * size)
             name = name.rstrip(b"\0").decode()
             print("  %-16s %-6s %-6s  %dx%dx%d  elem=%dB"
                   % (name, KERNEL_KIND.get(kind, "?"),
                      DEVICE_KIND.get(device, "?"), m, n, k, elem))
             if image_size:
                 blob = data[offset + image_offset:offset + image_offset + image_size]
-                print("    %-14s %d bytes, %s   launch grid=%d block=%d"
-                      % ("device image", image_size, image_kind(blob), grid, block))
+                print("    %-14s %d bytes, %s   grid=(%d,%d) block=(%d,%d)"
+                      % ("device image", image_size, image_kind(blob),
+                         grid_x, grid_y, block_x, block_y))
                 if args.image == name:
                     out = name + ".bin"
                     open(out, "wb").write(blob)

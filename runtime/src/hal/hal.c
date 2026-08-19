@@ -67,6 +67,10 @@ void *hexir_buffer_host_pointer(hexir_buffer_t *buffer) {
   return buffer->device->vtable->buffer_host_pointer(buffer);
 }
 
+void *hexir_buffer_device_pointer(hexir_buffer_t *buffer) {
+  return buffer ? buffer->impl : NULL;
+}
+
 hexir_status_t hexir_buffer_write(hexir_buffer_t *dst, const void *src,
                                   size_t size) {
   if (!dst || !src)
@@ -78,14 +82,15 @@ hexir_status_t hexir_buffer_write(hexir_buffer_t *dst, const void *src,
 
 hexir_status_t hexir_device_launch(hexir_device_t *device, const void *image,
                                    size_t image_size, const char *entry,
-                                   unsigned grid_x, unsigned block_x,
+                                   unsigned grid_x, unsigned grid_y,
+                                   unsigned block_x, unsigned block_y,
                                    hexir_buffer_t **args, unsigned arg_count) {
   if (!device || !image || !entry)
     return HEXIR_ERROR_INVALID_ARGUMENT;
   if (!device->vtable->launch)
     return HEXIR_ERROR_UNIMPLEMENTED;
   return device->vtable->launch(device, image, image_size, entry, grid_x,
-                                block_x, args, arg_count);
+                                grid_y, block_x, block_y, args, arg_count);
 }
 
 hexir_status_t hexir_buffer_read(const hexir_buffer_t *src, void *dst,

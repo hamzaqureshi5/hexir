@@ -153,22 +153,36 @@ def HexTIR_ForOp : HexTIR_Op<"for", [
     Index:$upper_bound,
     Index:$step,
     StrAttr:$kind,
-    OptionalAttr<StrAttr>:$thread
+    OptionalAttr<StrAttr>:$thread,
+    Variadic<AnyType>:$init_args
   );
+  // Loop-carried values. A reduction accumulator belongs in a register, not in
+  // the buffer it eventually lands in: without this the only place to keep a
+  // running sum is memory, and the inner loop pays a load and a store per
+  // iteration for something that never needs to leave the thread.
+  let results = (outs Variadic<AnyType>:$results);
   let regions = (region SizedRegion<1>:$body);
 
   let builders = [OpBuilder<(ins
-    "Value":$lowerBound, "Value":$upperBound, "Value":$step, "StringRef":$kind)
+    "Value":$lowerBound, "Value":$upperBound, "Value":$step, "StringRef":$kind,
+    CArg<"ValueRange", "{}">:$initArgs)
   >];
 
   let extraClassDeclaration = [{
-    /// The loop induction variable (the entry block argument of the body).
+    /// The loop induction variable (the first entry block argument).
     ::mlir::Value getInductionVar() { return getBody().front().getArgument(0); }
+
+    /// The loop-carried values, one per init arg, after the induction variable.
+    ::mlir::Block::BlockArgListType getRegionIterArgs() {
+      return getBody().front().getArguments().drop_front();
+    }
   }];
 
   let assemblyFormat = [{
     $kind $lower_bound `to` $upper_bound `step` $step
-    (`bind` $thread^)? attr-dict-with-keyword $body
+    (`bind` $thread^)?
+    (`iter_args` `(` $init_args^ `:` type($init_args) `)`)?
+    attr-dict-with-keyword $body (`->` type($results)^)?
   }];
 }
 

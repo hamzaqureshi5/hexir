@@ -120,8 +120,13 @@ struct Serializer {
   /// argument expands into seven scalars and the runtime would have to build
   /// MLIR's descriptor layout by hand. With it a kernel argument is one device
   /// pointer.
+  // grid.x, grid.y, block.x, block.y for each kernel.
+  struct Geometry {
+    uint32_t grid_x = 1, grid_y = 1, block_x = 1, block_y = 1;
+  };
+
   llvm::StringMap<std::string> compileDeviceImages(
-      llvm::StringMap<std::pair<uint32_t, uint32_t>> &geometry) {
+      llvm::StringMap<Geometry> &geometry) {
     llvm::StringMap<std::string> blobs;
 
     bool anyCuda = false;
@@ -149,12 +154,18 @@ struct Serializer {
     }
 
     clone->walk([&](gpu::GPUModuleOp gpuModule) {
-      auto grid = gpuModule->getAttrOfType<IntegerAttr>("hexir.grid_x");
-      auto block = gpuModule->getAttrOfType<IntegerAttr>("hexir.block_x");
+      auto read = [&](StringRef attr) -> uint32_t {
+        auto value = gpuModule->getAttrOfType<IntegerAttr>(attr);
+        return value ? static_cast<uint32_t>(value.getInt()) : 1u;
+      };
       StringRef name = gpuModule.getName();
       name.consume_back("_module");
-      geometry[name] = {grid ? static_cast<uint32_t>(grid.getInt()) : 1u,
-                        block ? static_cast<uint32_t>(block.getInt()) : 1u};
+      Geometry g;
+      g.grid_x = read("hexir.grid_x");
+      g.grid_y = read("hexir.grid_y");
+      g.block_x = read("hexir.block_x");
+      g.block_y = read("hexir.block_y");
+      geometry[name] = g;
     });
 
     {
@@ -205,7 +216,7 @@ struct Serializer {
   }
 
   LogicalResult collectExecutables() {
-    llvm::StringMap<std::pair<uint32_t, uint32_t>> geometry;
+    llvm::StringMap<Geometry> geometry;
     llvm::StringMap<std::string> blobs = compileDeviceImages(geometry);
 
     SmallVector<hexir_executable_entry_t> entries;
@@ -242,8 +253,14 @@ struct Serializer {
         entry.image_size = static_cast<uint32_t>(blob->second.size());
         images.raw(blob->second.data(), blob->second.size());
         auto dims = geometry.find(fn.getSymName());
-        entry.grid_x = dims != geometry.end() ? dims->second.first : 1u;
-        entry.block_x = dims != geometry.end() ? dims->second.second : 1u;
+        if (dims != geometry.end()) {
+          entry.grid_x = dims->second.grid_x;
+          entry.grid_y = dims->second.grid_y;
+          entry.block_x = dims->second.block_x;
+          entry.block_y = dims->second.block_y;
+        } else {
+          entry.grid_x = entry.grid_y = entry.block_x = entry.block_y = 1u;
+        }
       }
 
       executableIndex[fn.getSymName()] =
@@ -289,9 +306,18 @@ struct Serializer {
         auto type = cast<RankedTensorType>(constant.getType());
 
         uint64_t offset = rodata.size();
-        // Raw data goes in verbatim: the runtime uses it from the mapping.
+        uint64_t bytes = byteSize(type);
+
+        // A splat stores one element, however large the tensor is, so writing
+        // getRawData() verbatim would emit 8 bytes for a 256x256 matrix and
+        // the runtime would reject the module. Expand it.
         llvm::ArrayRef<char> raw = dense.getRawData();
-        rodata.raw(raw.data(), raw.size());
+        if (dense.isSplat()) {
+          for (uint64_t written = 0; written < bytes; written += raw.size())
+            rodata.raw(raw.data(), raw.size());
+        } else {
+          rodata.raw(raw.data(), raw.size());
+        }
         rodata.padTo(8);
 
         uint64_t slot = assignSlot(constant.getResult());

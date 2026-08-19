@@ -65,17 +65,26 @@ void PrimFuncOp::print(mlir::OpAsmPrinter &p) {
 
 void ForOp::build(mlir::OpBuilder &builder, mlir::OperationState &state,
                   mlir::Value lowerBound, mlir::Value upperBound,
-                  mlir::Value step, llvm::StringRef kind) {
+                  mlir::Value step, llvm::StringRef kind,
+                  mlir::ValueRange initArgs) {
   state.addOperands({lowerBound, upperBound, step});
+  state.addOperands(initArgs);
   state.addAttribute(getKindAttrName(state.name), builder.getStringAttr(kind));
+  // One result per loop-carried value, matching scf.for.
+  for (Value init : initArgs)
+    state.addTypes(init.getType());
 
-  // The body takes the induction variable as its single block argument and is
-  // terminated by hextir.yield.
+  // The body takes the induction variable first, then one argument per
+  // loop-carried value, and is terminated by hextir.yield.
   Region *body = state.addRegion();
   Block &block = body->emplaceBlock();
   block.addArgument(builder.getIndexType(), state.location);
+  for (Value init : initArgs)
+    block.addArgument(init.getType(), state.location);
 
   OpBuilder::InsertionGuard guard(builder);
   builder.setInsertionPointToEnd(&block);
-  YieldOp::create(builder, state.location, ValueRange{});
+  // The terminator has to yield the loop-carried values back; a caller that
+  // adds iter_args replaces this with a yield of the updated values.
+  YieldOp::create(builder, state.location, block.getArguments().drop_front());
 }

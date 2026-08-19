@@ -20,7 +20,7 @@
 # CHECK:      8.000000 17.000000
 # CHECK-NEXT: 12.000000 14.000000
 
-# SECTIONS: version       : 2
+# SECTIONS: version       : 3
 # SECTIONS: sections      : 4
 # SECTIONS: symbols
 # SECTIONS: program

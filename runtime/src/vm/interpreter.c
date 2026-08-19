@@ -110,7 +110,8 @@ static hexir_status_t vm_dispatch(vm_state_t *vm, const uint64_t *operands,
     return hexir_device_launch(vm->device,
                                vm->executable_base + exe->image_offset,
                                exe->image_size, exe->name, exe->grid_x,
-                               exe->block_x, buffers, (unsigned)arg_count);
+                               exe->grid_y, exe->block_x, exe->block_y, buffers,
+                               (unsigned)arg_count);
   }
 
 
@@ -193,6 +194,12 @@ static hexir_status_t vm_print(vm_state_t *vm, uint64_t slot, uint64_t rows,
 
 hexir_status_t hexir_execute(const hexir_module_t *module,
                              hexir_device_t *device, const char *entry) {
+  return hexir_execute_capture(module, device, entry, NULL, 0);
+}
+
+hexir_status_t hexir_execute_capture(const hexir_module_t *module,
+                                     hexir_device_t *device, const char *entry,
+                                     void *out_result, size_t out_size) {
   if (!module || !device || !entry)
     return HEXIR_ERROR_INVALID_ARGUMENT;
 
@@ -249,6 +256,7 @@ hexir_status_t hexir_execute(const hexir_module_t *module,
 
   const uint8_t *program = (const uint8_t *)program_data;
   hexir_status_t status = HEXIR_OK;
+  int64_t result_slot = -1;
 
   while (status == HEXIR_OK) {
     if (pc + sizeof(hexir_command_header_t) > program_size) {
@@ -269,8 +277,16 @@ hexir_status_t hexir_execute(const hexir_module_t *module,
 
     switch (header.kind) {
     case HEXIR_CMD_END:
+      if (out_result && out_size && result_slot >= 0) {
+        hexir_buffer_t *buffer = vm_slot(&vm, (uint64_t)result_slot);
+        if (!buffer || out_size > hexir_buffer_size(buffer)) {
+          vm_release(&vm);
+          return HEXIR_ERROR_INVALID_ARGUMENT;
+        }
+        status = hexir_buffer_read(buffer, out_result, out_size);
+      }
       vm_release(&vm);
-      return HEXIR_OK;
+      return status;
 
     case HEXIR_CMD_ALLOC: {
       hexir_buffer_t *buffer = NULL;
@@ -300,6 +316,10 @@ hexir_status_t hexir_execute(const hexir_module_t *module,
 
     case HEXIR_CMD_DISPATCH:
       status = vm_dispatch(&vm, operands, header.operand_count);
+      // The destination is the last argument, by the destination-passing
+      // convention, so this is the program's result so far.
+      if (status == HEXIR_OK && header.operand_count >= 3)
+        result_slot = (int64_t)operands[header.operand_count - 1];
       break;
 
     case HEXIR_CMD_PRINT:

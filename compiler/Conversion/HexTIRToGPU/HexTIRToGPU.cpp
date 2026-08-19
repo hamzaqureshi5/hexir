@@ -28,6 +28,7 @@
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "llvm/ADT/STLExtras.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/IRMapping.h"
@@ -35,6 +36,7 @@
 #include "llvm/ADT/SmallVector.h"
 
 #include <memory>
+#include <string>
 
 using namespace mlir;
 
@@ -119,6 +121,8 @@ struct HexTIRToGPUPass
   LogicalResult cloneBody(OpBuilder &builder, Block &block, IRMapping &mapping,
                           hextir::PrimFuncOp fn) {
     for (Operation &op : block) {
+      // A yield carrying values is handled by cloneLoop, which needs it to
+      // build the scf.for terminator; a bare one is just a block terminator.
       if (isa<hextir::YieldOp, hextir::ReturnOp>(op))
         continue;
 
@@ -173,11 +177,25 @@ struct HexTIRToGPUPass
 
       // The induction variable comes from the hardware; the extent becomes a
       // launch dimension, recorded on the func for the host to read back.
+      // The suffix picks the hardware axis. Ignoring it and always reading .x
+      // silently makes two different loops read the same index, which computes
+      // one row of the answer very quickly.
+      gpu::Dimension dim;
+      if (thread->ends_with(".x"))
+        dim = gpu::Dimension::x;
+      else if (thread->ends_with(".y"))
+        dim = gpu::Dimension::y;
+      else if (thread->ends_with(".z"))
+        dim = gpu::Dimension::z;
+      else
+        return forOp.emitOpError("bound axis '")
+               << *thread << "' has no .x/.y/.z suffix";
+
       Value id;
       if (thread->starts_with("blockIdx"))
-        id = gpu::BlockIdOp::create(builder, loc, gpu::Dimension::x);
+        id = gpu::BlockIdOp::create(builder, loc, dim);
       else if (thread->starts_with("threadIdx"))
-        id = gpu::ThreadIdOp::create(builder, loc, gpu::Dimension::x);
+        id = gpu::ThreadIdOp::create(builder, loc, dim);
       else
         return forOp.emitOpError("unsupported bound axis '") << *thread << "'";
 
@@ -190,24 +208,58 @@ struct HexTIRToGPUPass
       auto gpuModule = builder.getInsertionBlock()
                            ->getParentOp()
                            ->getParentOfType<gpu::GPUModuleOp>();
-      gpuModule->setAttr(thread->starts_with("blockIdx") ? "hexir.grid_x"
-                                                         : "hexir.block_x",
-                         builder.getI64IntegerAttr(*extent));
+      // One attribute per axis, so two bound loops cannot overwrite each
+      // other's extent.
+      std::string name = (thread->starts_with("blockIdx") ? "hexir.grid_"
+                                                          : "hexir.block_") +
+                         thread->substr(thread->size() - 1).str();
+      gpuModule->setAttr(name, builder.getI64IntegerAttr(*extent));
 
       mapping.map(forOp.getBody().front().getArgument(0), id);
       return cloneBody(builder, forOp.getBody().front(), mapping, fn);
     }
 
     // serial and parallel both stay loops inside the kernel.
+    SmallVector<Value> initArgs;
+    for (Value init : forOp.getInitArgs())
+      initArgs.push_back(mapping.lookupOrDefault(init));
+
     auto loop = scf::ForOp::create(
         builder, loc, mapping.lookupOrDefault(forOp.getLowerBound()),
         mapping.lookupOrDefault(forOp.getUpperBound()),
-        mapping.lookupOrDefault(forOp.getStep()));
+        mapping.lookupOrDefault(forOp.getStep()), initArgs);
     mapping.map(forOp.getBody().front().getArgument(0), loop.getInductionVar());
+    for (auto [from, to] :
+         llvm::zip(forOp.getRegionIterArgs(), loop.getRegionIterArgs()))
+      mapping.map(from, to);
+    for (auto [from, to] : llvm::zip(forOp.getResults(), loop.getResults()))
+      mapping.map(from, to);
 
-    OpBuilder::InsertionGuard guard(builder);
-    builder.setInsertionPointToStart(loop.getBody());
-    return cloneBody(builder, forOp.getBody().front(), mapping, fn);
+    {
+      OpBuilder::InsertionGuard guard(builder);
+      builder.setInsertionPointToStart(loop.getBody());
+      if (failed(cloneBody(builder, forOp.getBody().front(), mapping, fn)))
+        return failure();
+
+      // scf.for's builder gives an empty-yield terminator when there are no
+      // iter args, and none at all when there are. Either way, replace it with
+      // a yield of the values hextir.yield carries.
+      auto srcYield =
+          cast<hextir::YieldOp>(forOp.getBody().front().getTerminator());
+      SmallVector<Value> yielded;
+      for (Value value : srcYield.getValues())
+        yielded.push_back(mapping.lookupOrDefault(value));
+
+      // scf.for's builder only installs a yield when there are no iter args:
+      // with them it cannot know what to yield, so there may be no terminator
+      // at all. getTerminator() asserts in that case, hence the guard.
+      if (loop.getBody()->mightHaveTerminator())
+        if (Operation *existing = loop.getBody()->getTerminator())
+          existing->erase();
+      builder.setInsertionPointToEnd(loop.getBody());
+      scf::YieldOp::create(builder, loc, yielded);
+    }
+    return success();
   }
 };
 

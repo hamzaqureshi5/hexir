@@ -27,7 +27,8 @@ With no input file, the compiler builds a small program in C++ (a 2x2 matrix
 multiply) and compiles that. It is the quickest way to check your build works:
 
 ```bash
-./build/hexir -emit=jit
+./build/hexir -emit=hxb -o hello.hxb
+./build/hexir-run hello.hxb
 ```
 
 ```text
@@ -53,7 +54,8 @@ func.func @main() {
 Then:
 
 ```bash
-./build/hexir -emit=jit mine.mlir
+./build/hexir -emit=hxb -o mine.hxb mine.mlir
+./build/hexir-run mine.hxb
 ```
 
 Five operations are supported end to end: `constant`, `linear`, `add`, `relu`
@@ -111,11 +113,10 @@ distributions that do not use NVIDIA's directory layout. Build instructions for
 LLVM are in `docs/llvm-cuda-build.txt`, and the setup runbook is
 [Running on a CUDA server](cuda-server.md).
 
-:::{warning}
-`-emit=jit` with a CUDA placement currently faults. The generated host code
-passes host pointers to the device with no transfers. The artifact path above
-does not have this problem, because the runtime allocates device-local buffers
-and copies into them.
+:::{note}
+A module whose kernels are split across devices cannot run yet: the runtime
+opens one device and runs the whole program on it. Place every compute op on
+the same device, or run the CPU and GPU versions separately.
 :::
 
 ## Ship a file instead
