@@ -35,17 +35,14 @@ middle — a complete pipeline, in about five thousand lines.
 hexir.print %r : tensor<2x2xf64>
 ```
 
-## Two ways to run a program
-
-```bash
-hexir -emit=jit                              # compile and run, in one process
-```
+## Compile, then run
 
 ```bash
 hexir -emit=hxb -o model.hxb                 # compile to a file
 hexir-run model.hxb                          # run it later, no compiler present
 ```
 
+There is one way to run a program: compile it to a file, then run the file.
 `hexir-run` links no MLIR and no LLVM. A GPU-placed kernel is compiled to a
 CUBIN and embedded in the file, so the runtime loads and launches it with no
 compiler in the process:
@@ -95,7 +92,6 @@ for learning:
 | `-emit=mlir-gpu` | CUDA kernels as `gpu.launch` |
 | `-emit=llvm` | LLVM IR |
 | `-emit=hxb` | a deployable module |
-| `-emit=jit` | compile and run |
 
 Move an operation between devices without recompiling the compiler:
 
@@ -160,15 +156,14 @@ say which rather than leaving you to find out.
 
 | Works | Partly | Not yet |
 | --- | --- | --- |
-| CPU path, end to end | GPU kernels are one block, one thread | Transfer insertion in the JIT path |
-| Per-operation placement | CPU kernels in `.hxb` are descriptions, not code | Memory planning |
+| CPU and GPU, end to end | GPU kernels have no tiling yet | Multi-device modules in one run |
+| Per-operation placement | CPU kernels in `.hxb` are descriptions, not code | f32; memory planning |
 | `.hxb` artifacts, CPU and GPU | | More operations and a frontend |
 
-Two things worth knowing before you benchmark anything: the generated GPU
-kernel launches with a single block and a single thread, so it is correct and
-slow; and the JIT's GPU path passes host pointers to the device, so a
-GPU-placed `-emit=jit` faults. The artifact path does not have that problem,
-because the runtime's buffers are device-local by construction.
+Benchmarks live in `bench/`. On a GTX 1660 Ti a matmul currently runs about
+2.6x slower than cuBLAS in f64, verified against a CPU reference. The kernel
+has no shared-memory tiling yet, and the whole dialect is f64 on a card whose
+f64 rate is 1/32 of its f32 rate, so there is a lot of headroom in both.
 
 ## Contributing
 

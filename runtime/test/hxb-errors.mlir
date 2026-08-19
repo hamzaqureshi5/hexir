@@ -17,7 +17,7 @@
 // A module records the device each kernel was placed on. Running it on a
 // different device would give a right answer from the wrong hardware, so it is
 // refused.
-// RUN: %hexir -emit=hxb -o %t.cuda.hxb -placement=hexir.linear=cuda %S/hxb-vs-jit.mlir
+// RUN: %hexir -emit=hxb -o %t.cuda.hxb -placement=hexir.linear=cuda %S/hxb-cpu-vs-gpu.mlir
 // RUN: not %hexir-run --quiet %t.cuda.hxb 2>&1 | FileCheck %s --check-prefix=MISPLACED
 // MISPLACED: placed on cuda but the active device is cpu
 

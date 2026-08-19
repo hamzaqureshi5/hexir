@@ -4,6 +4,7 @@
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringSet.h"
 #include <string>
+#include <vector>
 
 namespace mlir {
 namespace hexir {
@@ -26,6 +27,19 @@ public:
   /// -placement command-line flag). Returns false if the op does not
   /// support the requested target.
   bool setPreferredTarget(StringRef opName, StringRef target);
+
+  /// Is this an op the registry knows about at all?
+  ///
+  /// Distinct from isSupported: an unknown op and an op that cannot run on the
+  /// requested device are different mistakes and deserve different messages.
+  bool isKnownOp(StringRef opName) const;
+
+  /// Every placeable op, sorted, for diagnostics. Naming what is valid is more
+  /// use to someone who mistyped than saying their input was invalid.
+  std::vector<std::string> knownOps() const;
+
+  /// The devices this op can run on, sorted.
+  std::vector<std::string> targetsFor(StringRef opName) const;
 
 private:
   TargetSupport();

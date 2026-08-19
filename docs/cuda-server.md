@@ -12,7 +12,7 @@ CUDA toolkit is required. This is the setup + verification runbook for the serve
 | Matmul GPU kernel (`gpu.launch`) | `src/LowerCudaToGpu.cpp::lowerMatmul` | ✅ IR verified locally |
 | Generic elementwise GPU kernel (relu/add/…) | `src/LowerCudaToGpu.cpp::lowerElementwise` | ✅ IR verified locally |
 | Kernel outlining → NVVM → CUBIN → runtime calls | `src/main.cpp` (pass pipeline, sm_86) | ⏳ needs CUDA toolkit |
-| JIT loading of CUDA runtime | `src/main.cpp::runJit` (auto-detects the .so) | ⏳ needs CUDA toolkit |
+| CUDA runtime in `hexir-run` | `runtime/src/hal/cuda/` (libcuda dlopened) | ✅ working |
 
 ## Server setup (one-time)
 
@@ -42,8 +42,8 @@ cmake .. -DCMAKE_BUILD_TYPE=Release && make -j$(nproc)
 Notes:
 - Kernels target **sm_86** (A6000), set in `src/main.cpp` (`nvvmOpts.chip`). For a
   different GPU, change that one line (e.g. `sm_80` for A100, `sm_89` for L4/4090).
-- `runJit` looks for `/usr/local/lib/libmlir_cuda_runtime.so` and skips it if
-  absent — so the same binary works on CPU-only machines.
+- `hexir-run` dlopens `libcuda` rather than linking it, so the same binary works
+  on CPU-only machines.
 
 ## Verification sequence (run in order)
 
@@ -51,7 +51,7 @@ Notes:
 cd build
 
 # 1. CPU baseline — must print: 8.000000 17.000000 / 12.000000 14.000000
-./hexir -emit=jit -placement=hexir.linear=cpu
+./hexir -emit=hxb -o cpu.hxb && ./hexir-run cpu.hxb
 
 # 2. Inspect GPU IR (works even before toolchain is verified)
 ./hexir -emit=mlir-gpu                  # expect: gpu.launch {device="cuda"}
@@ -61,13 +61,13 @@ cd build
 # expect: gpu.binary blob + mgpuModuleLoad/mgpuLaunchKernel calls
 
 # 4. Heterogeneous execution: matmul on A6000, relu on CPU  ← the goal
-./hexir -emit=jit
+./hexir -emit=hxb -o m.hxb && ./hexir-run m.hxb
 # expected output (identical to CPU baseline):
 # 8.000000 17.000000
 # 12.000000 14.000000
 
 # 5. Everything on GPU (relu via the generic elementwise kernel)
-./hexir -emit=jit -placement=hexir.relu=gpu
+./hexir -emit=hxb -o gpu.hxb -placement=hexir.linear=cuda,hexir.relu=cuda && ./hexir-run --device=cuda gpu.hxb
 
 # 6. Full test suite — the 3 CUDA-gated tests un-skip automatically
 #    (lit detects nvcc on PATH and enables the 'cuda' feature)
@@ -77,10 +77,10 @@ make check-hexir       # expect: 9/9 pass, 0 unsupported
 ## Placement cheat-sheet
 
 ```bash
-./hexir -emit=jit                                            # linear=GPU, relu=CPU (default)
-./hexir -emit=jit -placement=hexir.linear=cpu                # all CPU
-./hexir -emit=jit -placement=hexir.relu=gpu                  # all GPU
-./hexir -emit=jit -placement=hexir.linear=cpu,hexir.relu=gpu # swapped
+./hexir -emit=hxb -o m.hxb                                   # everything on the CPU (default)
+./hexir -emit=hxb -o cpu.hxb && ./hexir-run cpu.hxb                # all CPU
+./hexir -emit=hxb -o gpu.hxb -placement=hexir.linear=cuda,hexir.relu=cuda && ./hexir-run --device=cuda gpu.hxb                  # all GPU
+./hexir -emit=hxb -o cpu.hxb && ./hexir-run cpu.hxb,hexir.relu=gpu # swapped
 ```
 
 Defaults live in `src/TargetInfo.cpp` (`opPreferred_`); `gpu` ≡ `cuda`.

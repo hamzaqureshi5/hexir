@@ -2,6 +2,7 @@
 #include "hexir/Dialect/Hexir/IR/HexirDialect.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/STLExtras.h"
 
 namespace mlir {
 namespace hexir {
@@ -63,6 +64,29 @@ void TargetSupport::registerSupport(StringRef opName,
   llvm::StringSet<> &opSet = opSupports_[opName];
   for (StringRef target : targets)
     opSet.insert(normalizeTarget(target));
+}
+
+bool TargetSupport::isKnownOp(StringRef opName) const {
+  return opSupports_.find(opName) != opSupports_.end();
+}
+
+std::vector<std::string> TargetSupport::knownOps() const {
+  std::vector<std::string> names;
+  for (const auto &entry : opSupports_)
+    names.push_back(entry.first().str());
+  llvm::sort(names);
+  return names;
+}
+
+std::vector<std::string> TargetSupport::targetsFor(StringRef opName) const {
+  std::vector<std::string> names;
+  auto it = opSupports_.find(opName);
+  if (it == opSupports_.end())
+    return names;
+  for (const auto &target : it->second)
+    names.push_back(target.first().str());
+  llvm::sort(names);
+  return names;
 }
 
 bool TargetSupport::setPreferredTarget(StringRef opName, StringRef target) {

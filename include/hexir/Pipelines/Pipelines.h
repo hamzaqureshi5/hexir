@@ -30,12 +30,11 @@ enum class Stage {
   Hetero,       // -emit=mlir-hetero
   GPU,          // -emit=mlir-gpu
   LLVMDialect,  // -emit=mlir-llvm
-  LLVMIR,       // -emit=llvm
-  JIT           // -emit=jit
+  LLVMIR        // -emit=llvm
 };
 
 struct PipelineOptions {
-  Stage stage = Stage::JIT;
+  Stage stage = Stage::Hexir;
   bool enableOpt = false;
 
   /// NVPTX target for the CUDA path. sm_86 is the A6000; use sm_80 for A100,

@@ -30,7 +30,7 @@
 
 // A device the op does not support is rejected before any pass runs.
 // RUN: not %hexir -emit=mlir-hetero -placement=hexir.linear=tpu %s 2>&1 | FileCheck %s --check-prefix=BADDEV
-// BADDEV: invalid -placement entry
+// BADDEV: 'tpu' is not a device
 
 func.func @main() {
   %a = hexir.constant dense<[[3.0, 1.0], [2.0, 2.0]]> : tensor<2x2xf64>
@@ -40,3 +40,18 @@ func.func @main() {
   hexir.print %r : tensor<2x2xf64>
   return
 }
+
+// An op the registry does not know is a different mistake from a device it
+// cannot run on, and says so.
+// RUN: not %hexir -emit=mlir-hetero -placement=hexir.nosuchop=cuda %s 2>&1 | FileCheck %s --check-prefix=BADOP
+// BADOP: 'hexir.nosuchop' is not a placeable op
+
+// The architecture travels with the device it describes.
+// RUN: not %hexir -emit=mlir-hetero -target=cuda:turing %s 2>&1 | FileCheck %s --check-prefix=BADARCH
+// BADARCH: is not a CUDA architecture
+
+// Nothing to do without -emit, and usage rather than silence.
+// RUN: not %hexir %s 2>&1 | FileCheck %s --check-prefix=NOEMIT
+// NOEMIT: no -emit=<stage> given
+// NOEMIT: usage: hexir
+// NOEMIT: placeable ops:

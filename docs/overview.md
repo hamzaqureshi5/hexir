@@ -61,20 +61,17 @@ The cost of this design is that the attribute can get dropped: a pass that
 rebuilds an op without copying it loses the decision. That is why the partition
 pass runs a second time, as a safety net for anything unlabelled.
 
-## The two ways out
+## Out to a file
 
-Once each operation is a kernel, the compiler can either finish the job itself
-or hand you a file.
+Once each operation is a kernel, the compiler hands you a file.
 
-**Just run it** (`-emit=jit`). Lower all the way to LLVM IR and execute it in
-this process. Fast to iterate on, but the compiler has to be present.
+`-emit=hxb` serializes the program into a module and stops. `hexir-run` loads
+that file later; it links no MLIR and no LLVM, so it is tens of kilobytes
+instead of hundreds of megabytes.
 
-**Write a file** (`-emit=hxb`). Serialize the program into a `.hxb` module and
-stop. `hexir-run` loads that file later. It links no MLIR and no LLVM, so it is
-a few hundred kilobytes instead of a few hundred megabytes.
-
-Both paths must produce the same numbers, and there is a test that diffs them
-to make sure.
+A GPU kernel is compiled to a CUBIN and embedded, so the runtime launches it
+with no compiler present. The same program compiled for either device must
+produce the same numbers, and there is a test that diffs them to make sure.
 
 ## What to read next
 

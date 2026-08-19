@@ -1,0 +1,12 @@
+# The program built in C++ by Builder.cpp, compiled and run.
+#
+# Every other test passes its own .mlir, so this is the one that covers the
+# no-input path -- worth keeping, because that is what a bare `hexir` run does.
+#
+# REQUIRES: runtime, compiler
+# RUN: %hexir -emit=hxb -o %t.hxb
+# RUN: %hexir-run --quiet %t.hxb | FileCheck %s
+
+# [[3,1],[2,2]] x [[1,5],[5,2]]
+# CHECK:      8.000000 17.000000
+# CHECK-NEXT: 12.000000 14.000000

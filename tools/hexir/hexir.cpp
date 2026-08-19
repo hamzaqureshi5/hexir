@@ -141,12 +141,19 @@ static cl::opt<Stage> emitAction(
                           "output MLIR after lowering CUDA partitions to GPU")),
     cl::values(clEnumValN(Stage::LLVMDialect, "mlir-llvm",
                           "output the MLIR dump after llvm lowering")),
-    cl::values(clEnumValN(Stage::LLVMIR, "llvm", "output the LLVM IR dump")),
-    cl::values(
-        clEnumValN(Stage::JIT, "jit",
-                   "JIT the code and run it by invoking the main function")));
+    cl::values(clEnumValN(Stage::LLVMIR, "llvm", "output the LLVM IR dump")));
 
 static cl::opt<bool> enableOpt("opt", cl::desc("Enable optimizations"));
+
+// Resolved once in main from -target / -gpu-chip, then read by the pipeline
+// and the serializer.
+static std::string resolvedGpuChip;
+
+static cl::list<std::string> targetSpecs(
+    "target", cl::CommaSeparated, cl::ZeroOrMore,
+    cl::desc("Device to compile for, with its architecture: "
+             "<cpu|cuda>[:<sm_XX>]. Repeatable. Default cpu and cuda:sm_75."),
+    cl::value_desc("device[:arch]"));
 
 static cl::opt<std::string> gpuChip(
     "gpu-chip",
@@ -161,12 +168,61 @@ static cl::opt<std::string>
                    cl::value_desc("filename"), cl::init("out.hxb"));
 
 // Override op placement at runtime without recompiling, e.g.:
-//   ./hexir -emit=jit -placement=linalg.matmul=cpu
-//   ./hexir -emit=mlir-hetero -placement=linalg.matmul=cpu,linalg.generic=cuda
+//   ./hexir -emit=hxb -placement=hexir.linear=cuda
+//   ./hexir -emit=mlir-hetero -placement=hexir.linear=cpu,hexir.relu=cuda
 static cl::list<std::string> placementOverrides(
     "placement", cl::CommaSeparated, cl::ZeroOrMore,
     cl::desc("Override op placement: <op-name>=<cpu|cuda>[,...]"),
     cl::value_desc("op=device"));
+
+// What to print when the command line does not make sense.
+//
+// LLVM's own --help is a wall of options inherited from every linked library,
+// so it is close to useless for finding out how to drive this program. This
+// lists only what belongs to hexir, and names the valid values rather than
+// just saying the input was invalid: someone who mistyped an op needs to see
+// the list of ops.
+static void printUsage() {
+  auto &targets = mlir::hexir::TargetSupport::getInstance();
+
+  llvm::errs() << R"(usage: hexir [options] [input.mlir]
+
+Compiles a program in the hexir dialect. With no input file it compiles the
+program built in C++ by compiler/Support/Builder.cpp.
+
+  -emit=<stage>          what to produce (required to get output)
+       mlir              the graph as written
+       mlir-tir          each compute op as a hextir kernel
+       hxb               a loadable module for the runtime; see -o
+       mlir-linalg       after lowering to linalg on tensors
+       mlir-hetero       placement, as device attributes on linalg ops
+       mlir-gpu          cuda-placed ops as gpu.launch
+       mlir-llvm         the LLVM dialect
+       llvm              translated LLVM IR
+
+  -o <file>              output path for -emit=hxb (default out.hxb)
+  -target=<device>[:<arch>]
+                         device to compile for, and which chip. Repeatable.
+                         default: cpu, cuda:sm_75
+  -placement=<op>=<device>[,...]
+                         where an op runs, overriding the default
+  -opt                   run LLVM's O3 pipeline
+
+examples:
+  hexir -emit=mlir-tir -placement=hexir.linear=cuda
+  hexir -emit=hxb -o model.hxb -target=cuda:sm_86 -placement=hexir.linear=cuda
+  hexir -emit=mlir-hetero -placement=hexir.linear=cuda,hexir.relu=cpu prog.mlir
+
+placeable ops:
+)";
+
+  for (const std::string &op : targets.knownOps()) {
+    llvm::errs() << "  " << op << "  ->  ";
+    llvm::interleaveComma(targets.targetsFor(op), llvm::errs());
+    llvm::errs() << "\n";
+  }
+  llvm::errs() << "\ndevices: cpu, cuda (gpu is accepted as an alias)\n";
+}
 
 // Apply -placement overrides to the TargetSupport registry. Returns failure
 // on malformed entries or unsupported op/device combinations.
@@ -174,17 +230,64 @@ static llvm::LogicalResult applyPlacementOverrides() {
   auto &targets = mlir::hexir::TargetSupport::getInstance();
   for (const std::string &entry : placementOverrides) {
     auto [opName, device] = llvm::StringRef(entry).split('=');
-    if (opName.empty() ||
-        (device != "cpu" && device != "cuda" && device != "gpu")) {
-      llvm::errs() << "error: invalid -placement entry '" << entry
-                   << "' (expected <op-name>=<cpu|cuda|gpu>)\n";
+
+    if (opName.empty() || device.empty()) {
+      llvm::errs() << "error: -placement entry '" << entry
+                   << "' is not of the form <op-name>=<device>\n\n";
+      return llvm::failure();
+    }
+    if (device != "cpu" && device != "cuda" && device != "gpu") {
+      llvm::errs() << "error: '" << device
+                   << "' is not a device; expected cpu, cuda or gpu\n\n";
+      return llvm::failure();
+    }
+    // An unknown op and an op that cannot run on the requested device are
+    // different mistakes, so say which one happened.
+    if (!targets.isKnownOp(opName)) {
+      llvm::errs() << "error: '" << opName
+                   << "' is not a placeable op\n\n";
       return llvm::failure();
     }
     if (!targets.setPreferredTarget(opName, device)) {
-      llvm::errs() << "error: op '" << opName << "' does not support target '"
-                   << device << "'\n";
+      llvm::errs() << "error: op '" << opName << "' cannot run on '" << device
+                   << "'; it supports ";
+      llvm::interleaveComma(targets.targetsFor(opName), llvm::errs());
+      llvm::errs() << "\n\n";
       return llvm::failure();
     }
+  }
+  return llvm::success();
+}
+
+// Parse -target=<device>[:<arch>] entries. The architecture belongs with the
+// device it describes, not in a separate flag: "compile for cuda" and "compile
+// for sm_86" are one decision, and splitting them lets them disagree.
+static llvm::LogicalResult applyTargets(std::string &gpuChipOut) {
+  for (const std::string &entry : targetSpecs) {
+    auto [device, arch] = llvm::StringRef(entry).split(':');
+    if (device == "cpu") {
+      if (!arch.empty()) {
+        llvm::errs() << "error: the cpu target takes no architecture ('"
+                     << entry << "')\n\n";
+        return llvm::failure();
+      }
+      continue;
+    }
+    if (device == "cuda" || device == "gpu") {
+      if (!arch.empty()) {
+        if (!arch.starts_with("sm_")) {
+          llvm::errs() << "error: '" << arch
+                       << "' is not a CUDA architecture; expected sm_XX, for "
+                          "example sm_75\n\n";
+          return llvm::failure();
+        }
+        gpuChipOut = arch.str();
+      }
+      continue;
+    }
+    llvm::errs() << "error: '" << device
+                 << "' is not a device; expected cpu or cuda\n\n";
+    return llvm::failure();
   }
   return llvm::success();
 }
@@ -248,7 +351,7 @@ static int loadAndProcessMLIR(mlir::MLIRContext &context,
   mlir::hexir::PipelineOptions opts;
   opts.stage = emitAction;
   opts.enableOpt = enableOpt;
-  opts.gpuChip = gpuChip;
+  opts.gpuChip = resolvedGpuChip;
   mlir::hexir::buildHexirPipeline(pm, opts);
 
   if (mlir::failed(pm.run(*module)))
@@ -311,60 +414,6 @@ static int dumpLLVMIR(mlir::ModuleOp module) {
   return 0;
 }
 
-static int runJit(mlir::ModuleOp module) {
-  // Initialize LLVM targets.
-  llvm::InitializeNativeTarget();
-  llvm::InitializeNativeTargetAsmPrinter();
-
-
-  // An optimization pipeline to use within the execution engine.
-  auto optPipeline = mlir::makeOptimizingTransformer(
-      /*optLevel=*/enableOpt ? 3 : 0, /*sizeLevel=*/0,
-      /*targetMachine=*/nullptr);
-
-  // Create an MLIR execution engine. The execution engine eagerly JIT-compiles
-  // the module.
-  mlir::ExecutionEngineOptions engineOptions;
-  engineOptions.transformer = optPipeline;
-  // Load MLIR runner utilities (printf support) and CUDA runtime if available.
-  // To enable actual GPU execution:
-  //   1. Install CUDA toolkit:  sudo apt install nvidia-cuda-toolkit
-  //   2. Build MLIR with CUDA:  cmake -DMLIR_ENABLE_CUDA_RUNNER=ON ...
-  //      (produces /usr/local/lib/libmlir_cuda_runtime.so)
-  // Load MLIR runner utils and the CUDA runtime wrapper.
-  // libmlir_cuda_runtime.so provides mgpu* symbols (mgpuStreamCreate,
-  // mgpuLaunchKernel, etc.) that the lowered IR calls. It is produced by
-  // building MLIR on the server with:
-  //   cmake ... -DMLIR_ENABLE_CUDA_RUNNER=ON
-  // Always load runner utils; only load CUDA runtime if it exists on this
-  // machine.
-  // Both runtimes are optional and only present on machines where MLIR was
-  // built/installed with them. printf resolves from libc either way, so a
-  // missing c_runner_utils is not fatal -- don't hand the path to the engine
-  // if it isn't there, or it prints a spurious MemoryBuffer error.
-  llvm::SmallVector<llvm::StringRef> sharedLibs;
-  constexpr const char *runnerUtils =
-      "/usr/local/lib/libmlir_c_runner_utils.so";
-  constexpr const char *cudaRuntime = "/usr/local/lib/libmlir_cuda_runtime.so";
-  if (llvm::sys::fs::exists(runnerUtils))
-    sharedLibs.push_back(runnerUtils);
-  if (llvm::sys::fs::exists(cudaRuntime))
-    sharedLibs.push_back(cudaRuntime);
-  engineOptions.sharedLibPaths = sharedLibs;
-  auto maybeEngine = mlir::ExecutionEngine::create(module, engineOptions);
-  assert(maybeEngine && "failed to construct an execution engine");
-  auto &engine = maybeEngine.get();
-
-  // Invoke the JIT-compiled function.
-  auto invocationResult = engine->invokePacked("main");
-  if (invocationResult) {
-    llvm::errs() << "JIT invocation failed\n";
-    return -1;
-  }
-
-  return 0;
-}
-
 int main(int argc, char **argv) {
   // Register any command line options.
   mlir::registerAsmPrinterCLOptions();
@@ -373,9 +422,25 @@ int main(int argc, char **argv) {
 
   cl::ParseCommandLineOptions(argc, argv, "hexir compiler\n");
 
-  // Apply -placement overrides before any pass runs.
-  if (llvm::failed(applyPlacementOverrides()))
-    return 1;
+  // Nothing to do without -emit, and silently doing nothing is unhelpful.
+  if (emitAction.getNumOccurrences() == 0) {
+    llvm::errs() << "error: no -emit=<stage> given, so there is nothing to "
+                    "produce\n\n";
+    printUsage();
+    return 2;
+  }
+
+  // Targets first: placement is checked against what the registry allows, and
+  // the architecture a device was declared with feeds the GPU pipeline.
+  resolvedGpuChip = gpuChip;
+  if (llvm::failed(applyTargets(resolvedGpuChip))) {
+    printUsage();
+    return 2;
+  }
+  if (llvm::failed(applyPlacementOverrides())) {
+    printUsage();
+    return 2;
+  }
 
   if (emitAction == Stage::AST)
     return dumpAST();
@@ -444,7 +509,7 @@ int main(int argc, char **argv) {
                    << "': " << ec.message() << "\n";
       return 1;
     }
-    if (mlir::failed(mlir::hexir::serializeToHXB(*module, os, gpuChip)))
+    if (mlir::failed(mlir::hexir::serializeToHXB(*module, os, resolvedGpuChip)))
       return 1;
     llvm::errs() << "wrote " << outputFilename << "\n";
     return 0;
@@ -460,10 +525,6 @@ int main(int argc, char **argv) {
   // Check to see if we are compiling to LLVM IR.
   if (emitAction == Stage::LLVMIR)
     return dumpLLVMIR(*module);
-
-  // Otherwise, we must be running the jit.
-  if (emitAction == Stage::JIT)
-    return runJit(*module);
 
   llvm::errs() << "No action specified (parsing only?), use -emit=<action>\n";
   return -1;
