@@ -280,4 +280,10 @@ rewrites — currently all patterns are commented out; only `ConstantOp::fold` i
 - `lib/` still carries Toy-tutorial provenance in comments and file headers; naming is
   inconsistent (`hexir::FuncOp` vs `func::FuncOp` — the shape-inference pass nests on the
   former, which only exists if `hexir.func` ops are built).
+- **Docs are a Sphinx site in `docs/`**, published to GitHub Pages by
+  `.github/workflows/docs.yml`. Pages are MyST Markdown so they read the same on GitHub and on the
+  site; diagrams are ```` ```mermaid ```` fences turned into directives by `myst_fence_as_directive`.
+  Build locally with `pip install -r docs/requirements.txt && sphinx-build -W -b html docs docs/_build/html`.
+  CI uses `-W`, so a broken link or a page missing from a toctree fails the build. Pygments has no
+  MLIR lexer, so `misc.highlighting_failure` is suppressed in `conf.py`.
 - `docs/cuda-server.md` is the runbook for the A6000/sm_86 setup and the failure/symptom table.

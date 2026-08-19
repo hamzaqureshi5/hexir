@@ -25,6 +25,8 @@ Hexir (**H**eterogeneous **EX**ecution **IR**) is a research compiler that demon
 hexir.print %3 : tensor<2x2xf64>
 ```
 
+**[Documentation](https://hamzaqureshi5.github.io/hexir/)** — architecture, IR levels, pass pipeline, runtime.
+
 ## Highlights
 
 - **Custom MLIR dialect** — `hexir` ops for neural-network primitives (`linear`, `relu`, `sigmoid`, `softmax`, …), defined in TableGen with shape inference
