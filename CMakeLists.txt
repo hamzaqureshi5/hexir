@@ -29,6 +29,15 @@ set(LLVM_LINK_COMPONENTS Core Support nativecodegen OrcJIT)
 
 add_definitions(${LLVM_DEFINITIONS})
 
+# The runtime is added BEFORE the LLVM/MLIR include_directories() below, so it
+# does not inherit them -- it must not depend on the compiler stack. See
+# runtime/CMakeLists.txt.
+option(HEXIR_BUILD_RUNTIME "Build the standalone hexir runtime" ON)
+if(HEXIR_BUILD_RUNTIME)
+  set(HEXIR_TOOLS_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+  add_subdirectory(runtime)
+endif()
+
 include_directories(
   ${LLVM_INCLUDE_DIRS}
   ${MLIR_INCLUDE_DIRS}

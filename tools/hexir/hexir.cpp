@@ -5,6 +5,7 @@
 #include "hexir/Dialect/HexTIR/IR/HexTIRDialect.h"
 #include "hexir/Dialect/LS/IR/LSDialects.h"
 #include "hexir/Conversion/Passes.h"
+#include "hexir/Pipelines/Pipelines.h"
 #include "hexir/Dialect/Hexir/Transforms/Passes.h"
 #include "hexir/Dialect/LS/Transforms/Passes.h"
 #include "hexir/Target/TargetInfo.h"
@@ -120,44 +121,27 @@ static cl::opt<enum InputType>
               cl::values(clEnumValN(MLIR, "mlir",
                                     "load the input file as an MLIR file")));
 
-namespace {
-enum Action {
-  None,
-  DumpAST,
-  DumpMLIR,
-  // Kernel level. Sits below DumpMLIR and above the linalg stages so that
-  // `emitAction >= DumpMLIRLinalg` stays false here: -emit=mlir-tir is a
-  // branch off the pipeline, not a step along it. Nothing lowers hextir
-  // further yet.
-  DumpMLIRTIR,
-  DumpMLIRAffine,
-  DumpMLIRLinalg,
-  DumpMLIRHetero,
-  DumpMLIRGPU,
-  DumpMLIRLLVM,
-  DumpLLVMIR,
-  RunJIT
-};
-} // namespace
-static cl::opt<enum Action> emitAction(
+using mlir::hexir::Stage;
+
+static cl::opt<Stage> emitAction(
     "emit", cl::desc("Select the kind of output desired"),
-    cl::values(clEnumValN(DumpMLIR, "mlir", "output the MLIR dump")),
-    cl::values(clEnumValN(DumpMLIRTIR, "mlir-tir",
+    cl::values(clEnumValN(Stage::Hexir, "mlir", "output the MLIR dump")),
+    cl::values(clEnumValN(Stage::TIR, "mlir-tir",
                           "output the MLIR dump after lowering hexir compute "
                           "ops to hextir prim funcs")),
-    cl::values(clEnumValN(DumpMLIRAffine, "mlir-affine",
+    cl::values(clEnumValN(Stage::Affine, "mlir-affine",
                           "output the MLIR dump after affine lowering")),
-    cl::values(clEnumValN(DumpMLIRLinalg, "mlir-linalg",
+    cl::values(clEnumValN(Stage::Linalg, "mlir-linalg",
                           "output the MLIR dump after linalg lowering")),
-    cl::values(clEnumValN(DumpMLIRHetero, "mlir-hetero",
+    cl::values(clEnumValN(Stage::Hetero, "mlir-hetero",
                           "output MLIR after CPU/CUDA partitioning")),
-    cl::values(clEnumValN(DumpMLIRGPU, "mlir-gpu",
+    cl::values(clEnumValN(Stage::GPU, "mlir-gpu",
                           "output MLIR after lowering CUDA partitions to GPU")),
-    cl::values(clEnumValN(DumpMLIRLLVM, "mlir-llvm",
+    cl::values(clEnumValN(Stage::LLVMDialect, "mlir-llvm",
                           "output the MLIR dump after llvm lowering")),
-    cl::values(clEnumValN(DumpLLVMIR, "llvm", "output the LLVM IR dump")),
+    cl::values(clEnumValN(Stage::LLVMIR, "llvm", "output the LLVM IR dump")),
     cl::values(
-        clEnumValN(RunJIT, "jit",
+        clEnumValN(Stage::JIT, "jit",
                    "JIT the code and run it by invoking the main function")));
 
 static cl::opt<bool> enableOpt("opt", cl::desc("Enable optimizations"));
@@ -234,209 +218,13 @@ static int loadAndProcessMLIR(mlir::MLIRContext &context,
     return error;
 
   mlir::PassManager pm(module.get()->getName());
-  // Apply any generic pass manager command line options and run the pipeline.
   if (mlir::failed(mlir::applyPassManagerCLOptions(pm)))
     return 4;
 
-  // Check to see what granularity of MLIR we are compiling to.
-  bool isLoweringToLinalg = emitAction >= Action::DumpMLIRLinalg;
-  bool isPartitioningForHetero = emitAction >= Action::DumpMLIRHetero;
-  // Run GPU lowering for every stage at or beyond mlir-gpu (incl. jit/llvm).
-  bool isLoweringCudaToGpu = emitAction >= Action::DumpMLIRGPU;
-  bool isLoweringToLLVM = emitAction >= Action::DumpMLIRLLVM;
-
-  if (enableOpt || isLoweringToLinalg) {
-    // Inline all functions into main and then delete them.
-    // pm.addPass(mlir::createInlinerPass());
-
-    // Now that there is only one function, we can infer the shapes of each of
-    // the operations.
-    mlir::OpPassManager &optPM = pm.nest<mlir::hexir::FuncOp>();
-    optPM.addPass(mlir::createCanonicalizerPass());
-    optPM.addPass(mlir::hexir::createShapeInferencePass());
-    optPM.addPass(mlir::createCanonicalizerPass());
-    optPM.addPass(mlir::createCSEPass());
-  }
-
-  // Kernel level: partition first so every compute op carries a `device`, then
-  // turn each one into a hextir.prim_func. Terminal stage -- nothing lowers
-  // hextir further yet, so it does not fall through to the linalg pipeline.
-  if (emitAction == Action::DumpMLIRTIR) {
-    pm.addPass(mlir::hexir::createPartitionPass());
-    pm.addPass(mlir::hexir::createLowerToTIRPass());
-    if (mlir::failed(pm.run(*module)))
-      return 4;
-    return 0;
-  }
-
-  if (isLoweringToLinalg) {
-    // Placement is decided on the frontend hexir ops (hexir.linear,
-    // hexir.relu, ...) BEFORE lowering; LowerToLinalg propagates the device
-    // attr onto the linalg ops it creates.
-    if (isPartitioningForHetero)
-      pm.addPass(mlir::hexir::createPartitionPass());
-
-    pm.addPass(mlir::hexir::createLowerToLinalgPass());
-
-    if (emitAction == Action::DumpMLIRLinalg) {
-      if (mlir::failed(pm.run(*module)))
-        return 4;
-      return 0;
-    }
-
-    if (isPartitioningForHetero) {
-      // Second run: fallback for linalg ops that didn't inherit a device
-      // attr (PartitionPass skips ops already annotated).
-      pm.addPass(mlir::hexir::createPartitionPass());
-      // Materialize device annotations into ls_cpu/ls_gpu model ops for ALL
-      // stages beyond linalg (not just the hetero inspection stage).
-      pm.addPass(mlir::hexir::createMaterializeLSTargetsPass());
-    }
-
-    if (emitAction == Action::DumpMLIRHetero) {
-      if (mlir::failed(pm.run(*module)))
-        return 4;
-      return 0;
-    }
-
-    // ls_cpu/ls_gpu → linalg (device attrs preserved for CudaGpuLoweringPass)
-    pm.addPass(mlir::hexir::createLSTargetsToLinalgPass());
-
-    // Tensor → MemRef.
-    //
-    // allowUnknownOps: `hexir.print` has no BufferizableOpInterface, so
-    // bufferization has to be allowed to leave it in place and materialize
-    // the tensor->memref conversion at its operand instead of bailing out.
-    // unknownTypeConversion=IdentityLayoutMap: make that materialization a
-    // plain `memref<2x2xf64>` instead of a fully-dynamic strided layout,
-    // which is what hexir.print's F64MemRef constraint and the printf
-    // lowering in LowerToLLVM.cpp expect.
-    // `tensor.empty` has no bufferization of its own -- One-Shot Bufferize
-    // requires it to be rewritten to `bufferization.alloc_tensor` first,
-    // otherwise the alloc_tensor it creates mid-flight is never added to the
-    // bufferization worklist and survives as an unbufferized tensor op.
-    pm.addPass(mlir::bufferization::createEmptyTensorToAllocTensorPass());
-
-    mlir::bufferization::OneShotBufferizePassOptions bufferizeOpts;
-    // Keep allowUnknownOps=false: every tensor op in the pipeline must have a
-    // BufferizableOpInterface (hexir.print gets one from
-    // src/BufferizableOpInterfaceImpl.cpp), so a genuine gap is reported as a
-    // failure rather than silently leaving tensors in the IR.
-    bufferizeOpts.unknownTypeConversion =
-        mlir::bufferization::LayoutMapOption::IdentityLayoutMap;
-    pm.addPass(mlir::bufferization::createOneShotBufferizePass(bufferizeOpts));
-    // Fold the to_tensor/to_buffer pairs the materialization leaves behind.
-    pm.addPass(mlir::createCanonicalizerPass());
-    pm.addPass(
-        mlir::bufferization::createBufferDeallocationSimplificationPass());
-
-    if (isLoweringCudaToGpu)
-      pm.addPass(mlir::hexir::createCudaGpuLoweringPass());
-
-    if (emitAction == Action::DumpMLIRGPU) {
-      if (mlir::failed(pm.run(*module)))
-        return 4;
-      return 0;
-    }
-
-    // Complete GPU lowering for stages beyond mlir-gpu (mlir-llvm, llvm, jit).
-    //
-    // Pipeline:
-    //   gpu.launch (inline body)
-    //     → gpu-kernel-outlining → gpu.module + gpu.launch_func
-    //     → nvvm-attach-target   → attaches NVPTX/sm_86 target to gpu.module
-    //     → convert-gpu-to-nvvm  → NVVM dialect inside gpu.module
-    //     → gpu-module-to-binary → compiles NVVM → PTX → CUBIN via ptxas
-    //                              (requires CUDA toolkit on the build machine)
-    //     → gpu-to-llvm          → host: gpu.launch_func → CUDA runtime calls
-    //
-    // Requires on the build/run machine:
-    //   - CUDA toolkit (nvcc, ptxas):  sudo apt install nvidia-cuda-toolkit
-    //   - libmlir_cuda_runtime.so:  build MLIR with
-    //   -DMLIR_ENABLE_CUDA_RUNNER=ON
-    //   - NVIDIA A6000 (sm_86) or adjust chip= below for other GPUs
-    // Linalg → loops for all CPU ops BEFORE GPU lowering so that gpu-to-llvm
-    // never sees live linalg ops (which it can't handle).
-    pm.addPass(mlir::createConvertLinalgToLoopsPass());
-
-    if (isLoweringCudaToGpu) {
-      // 1. Extract inline gpu.launch body into a separate gpu.module +
-      // gpu.launch_func
-      pm.addPass(mlir::createGpuKernelOutliningPass());
-
-      // 2. Tag the gpu.module with NVPTX/sm_86 target metadata (A6000 = sm_86)
-      mlir::GpuNVVMAttachTargetOptions nvvmOpts;
-      nvvmOpts.chip = "sm_86";
-      nvvmOpts.features = "+ptx80";
-      nvvmOpts.optLevel = 3;
-      pm.addPass(mlir::createGpuNVVMAttachTarget(nvvmOpts));
-
-      // 3. Lower GPU dialect ops to NVVM inside the gpu.module
-      {
-        mlir::OpPassManager &gpuPM = pm.nest<mlir::gpu::GPUModuleOp>();
-        gpuPM.addPass(mlir::createConvertGpuOpsToNVVMOps());
-      }
-
-      // 4. Compile NVVM → PTX → CUBIN and embed as gpu.binary
-      pm.addPass(mlir::createGpuModuleToBinaryPass());
-
-      // 5. Lower host-side gpu.launch_func to CUDA runtime calls
-      pm.addPass(mlir::createGpuToLLVMConversionPass());
-    }
-
-    // SCF → CFG
-    pm.addPass(mlir::createSCFToControlFlowPass());
-
-    // LLVM lowering
-    // pm.addPass(mlir::createConvertArithToLLVMPass());
-    // pm.addPass(mlir::createConvertMemRefToLLVMPass());
-    // pm.addPass(mlir::createConvertFuncToLLVMPass());
-  }
-
-  //   if (isLoweringToLinalg)
-  //   {
-  //     // Partially lower the hexir dialect.
-  //     pm.addPass(mlir::hexir::createLowerToLinalgPass());
-
-  //     // Add a few cleanups post lowering.
-  //     // mlir::OpPassManager &optPM = pm.nest<mlir::func::FuncOp>();
-  //     // optPM.addPass(mlir::createCanonicalizerPass());
-  //     // optPM.addPass(mlir::createCSEPass());
-
-  //     // Add optimizations if enabled.
-  //     if (enableOpt)
-  //     {
-  //       // optPM.addPass(mlir::affine::createLoopFusionPass());
-  //       // optPM.addPass(mlir::affine::createAffineScalarReplacementPass());
-  //     }
-  //     // 1. One-Shot Bufferization (Converts Tensor constants to MemRef
-  //     globals)
-
-  //     mlir::bufferization::OneShotBufferizationOptions options;
-  //     options.allowReturnAllocsFromLoops = true;
-  //     //pm.addPass(mlir::bufferization::createOneShotBufferizePass());
-  //     //  //pm.addPass(mlir::bufferization::createBufferDeallocationPass());
-  //     // pm.addPass(mlir::createConvertLinalgToLoopsPass());
-  //     //  pm.addPass(mlir::createConvertSCFToCFPass());
-  //     //   ------------------------------------------------------------
-  //     //   pm.addPass(mlir::createConvertArithToLLVMPass());
-  //     //   pm.addPass(mlir::createConvertMemRefToLLVMPass());
-  //     //   pm.addPass(mlir::createConvertFuncToLLVMPass());
-  //     //   pm.addPass(mlir::tosa::createTosaToArith());
-  //     llvm::errs() << "\n=== PASS PIPELINE ===\n";
-  // pm.printAsTextualPipeline(llvm::errs());
-  // llvm::errs() << "\n====================\n";
-
-  //   }
-
-  if (isLoweringToLLVM) {
-    // Finish lowering the hexir IR to the LLVM dialect.
-    pm.addPass(mlir::hexir::createLowerToLLVMPass());
-    // Clean up unrealized casts left by partial conversions (linalg→loops,
-    // bufferization, gpu-to-llvm) after the final LLVM lowering pass.
-    pm.addPass(mlir::createReconcileUnrealizedCastsPass());
-    pm.addPass(mlir::LLVM::createDIScopeForLLVMFuncOpPass());
-  }
+  mlir::hexir::PipelineOptions opts;
+  opts.stage = emitAction;
+  opts.enableOpt = enableOpt;
+  mlir::hexir::buildHexirPipeline(pm, opts);
 
   if (mlir::failed(pm.run(*module)))
     return 4;
@@ -575,7 +363,7 @@ int main(int argc, char **argv) {
   if (llvm::failed(applyPlacementOverrides()))
     return 1;
 
-  if (emitAction == Action::DumpAST)
+  if (emitAction == Stage::AST)
     return dumpAST();
 
   // If we aren't dumping the AST, then we are compiling with/to MLIR.
@@ -632,18 +420,18 @@ int main(int argc, char **argv) {
     return error;
 
   // If we aren't exporting to non-mlir, then we are done.
-  bool isOutputingMLIR = emitAction <= Action::DumpMLIRLLVM;
+  bool isOutputingMLIR = mlir::hexir::stageEmitsMLIR(emitAction);
   if (isOutputingMLIR) {
     module->dump();
     return 0;
   }
 
   // Check to see if we are compiling to LLVM IR.
-  if (emitAction == Action::DumpLLVMIR)
+  if (emitAction == Stage::LLVMIR)
     return dumpLLVMIR(*module);
 
   // Otherwise, we must be running the jit.
-  if (emitAction == Action::RunJIT)
+  if (emitAction == Stage::JIT)
     return runJit(*module);
 
   llvm::errs() << "No action specified (parsing only?), use -emit=<action>\n";

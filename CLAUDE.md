@@ -31,12 +31,15 @@ include/hexir/
   Dialect/{Hexir,HexTIR,LS}/IR/         dialect headers + .td  (one CMakeLists each, tablegen)
   Dialect/{Hexir,LS}/Transforms/        Passes.h for same-dialect rewrites
   Conversion/Passes.h                   every dialect-to-dialect pass
+  Pipelines/Pipelines.h                 the pass pipeline, and the Stage enum
   Target/, Support/
 lib/
   Dialect/<Name>/{IR,Transforms}/       mirrors include/
   Conversion/<A>To<B>/                  one directory per conversion
+  Pipelines/                            pass ordering
   Target/, Support/
-tools/hexir/hexir.cpp                   CLI, pass pipeline, JIT
+tools/hexir/hexir.cpp                   CLI, LLVM translation, JIT
+runtime/                                standalone C runtime (no MLIR/LLVM)
 cmake/HexirLibrary.cmake                hexir_library() helper
 ```
 
@@ -49,6 +52,32 @@ in its parent. New TableGen files need an entry in the matching `include/.../IR/
 Every hexir library links the same `HEXIR_MLIR_LIBS` set from the root `CMakeLists.txt`. The
 layering that is enforced here is between hexir's own modules; pinning exact MLIR deps per
 library would be churn at this size.
+
+### Runtime
+
+`runtime/` is a separate C99 project — its own `CMakeLists.txt`, buildable standalone, and with
+**no include path into `include/` and no MLIR or LLVM dependency**. That is the point: deploying a
+compiled module must not mean shipping the compiler. It is added from the root `CMakeLists.txt`
+*before* the LLVM/MLIR `include_directories()` so it cannot inherit them. If it ever needs to link
+an MLIR library, the layering is wrong.
+
+```
+runtime/include/hexir_runtime/   status.h  hal.h  module.h  runtime.h
+runtime/src/hal/                 vtable dispatch + cpu/ backend
+runtime/src/module/              mmap loader for the .hxb container
+runtime/tools/hexir-run/         deploy-side CLI -> build/hexir-run
+```
+
+The container is a header, a section table, then 8-byte-aligned payloads
+(SYMBOLS / PROGRAM / RODATA / EXECUTABLES). Sections are found by absolute file offset and used
+in place from the mapping, so a large RODATA costs nothing to load. Offsets come off disk and are
+bounds-checked before any pointer is handed out.
+
+**What is stubbed:** the compiler has no `-emit=hxb`, so nothing produces a module yet, and
+`hexir-run` has no command-list interpreter — it loads, validates, reports sections, and exits
+`HEXIR_ERROR_UNIMPLEMENTED` if asked to run. `--selftest` exercises the HAL without a module. The
+CUDA backend returns `HEXIR_ERROR_UNIMPLEMENTED`; it belongs in `src/hal/cuda/` and should use the
+driver API (`libcuda`) rather than the CUDA runtime API so it can be dlopened.
 
 `targets/` is **not** part of the build and references a nonexistent `ppytorch_core` — inert
 scaffolding. Per the architecture discussion those directories are the natural home for runtime
@@ -105,10 +134,12 @@ added to a PassManager). `-emit=ast` is a stub.
 
 ## Architecture
 
-The pipeline is assembled imperatively in `loadAndProcessMLIR` (`tools/hexir/hexir.cpp`), which is the
-single source of truth for pass ordering. Stage gating uses `emitAction >= Action::X` on the
-**ordered** `Action` enum, so enum order is semantically load-bearing — reordering it changes
-which passes run.
+Pass ordering lives in `buildHexirPipeline` (`lib/Pipelines/Pipelines.cpp`) — the single source of
+truth. It only *adds* passes and returns early once it has reached the requested stage; the driver
+runs the `PassManager` exactly once. Stage gating uses `>=` on the **ordered** `hexir::Stage` enum
+(`include/hexir/Pipelines/Pipelines.h`), so enum order is semantically load-bearing — reordering
+it changes which passes run. `tools/hexir/hexir.cpp` is now only CLI parsing, LLVM translation and
+the JIT.
 
 Pass order and the files implementing each:
 
