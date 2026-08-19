@@ -248,15 +248,15 @@ rewrites — currently all patterns are commented out; only `ConstantOp::fold` i
 
 ## Gotchas
 
-- **5 of 12 checked-in tests fail, for two reasons unrelated to the compiler.**
+- **5 of 14 checked-in tests fail, for two reasons unrelated to the compiler.**
   `TargetInfo.cpp` sets `opPreferred_["hexir.linear"] = "cpu"` (with a comment claiming GPU), and
   the relu call in `createMLPLinearFunction` is commented out — so `-emit=mlir-hetero` emits
   `ls_cpu.matmul` and no relu, while `partition-hetero.mlir`, `placement-flag.mlir`
   (DEFAULT/SWAP/ALLGPU), `hexir-dialect.mlir`, `lower-to-linalg.mlir`, and `cuda-to-gpu.mlir`
   expect `ls_gpu.matmul` and a relu. Restoring the relu fixes the first two; flipping the default
   to `cuda` fixes the rest but makes plain `-emit=jit` require a CUDA toolkit.
-  `jit-cpu.mlir`, `hextir-roundtrip.mlir`, `lower-to-tir.mlir` and `hxb-roundtrip.mlir` pass; the
-  other 3 are `REQUIRES: cuda` and report as unsupported.
+  Passing: `jit-cpu`, `hextir-roundtrip`, `lower-to-tir`, `hxb-roundtrip`, `hxb-vs-jit`,
+  `hxb-errors`. The other 3 are `REQUIRES: cuda` and report as unsupported.
 - **`LSToLinalg` has no pattern for `ls_cpu.add`/`ls_gpu.add`.** `MaterializeLSTargets` creates
   them from `linalg.add`, and nothing converts them back, so any program containing `hexir.add`
   fails at `-emit=mlir-gpu` and beyond with "failed to legalize operation 'ls_cpu.add'". Pre-existing;
@@ -265,6 +265,8 @@ rewrites — currently all patterns are commented out; only `ConstantOp::fold` i
 - **Do not write a FileCheck prefix followed by a colon in test prose.** A comment like
   `// Everything on the CPU: ...` in a test using `--check-prefix=CPU` is parsed as a directive
   and fails with a confusing "expected string not found in input".
+- `UNSUPPORTED` cannot be used as a FileCheck prefix — it is a reserved lit directive, and a test
+  using it fails as UNRESOLVED with a confusing parse error. Same for `REQUIRES` and `XFAIL`.
 - Tests asserting a non-zero exit need `not` in front of the command, or lit fails the RUN line
   itself. `%hexir-run` is registered in `lit.cfg.py` *before* `%hexir`, since lit applies
   substitutions in list order and the shorter pattern would otherwise eat the longer one.

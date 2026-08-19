@@ -17,6 +17,7 @@
 static int usage(void) {
   fprintf(stderr,
           "usage: hexir-run <module.hxb> [--device=cpu|cuda] [--entry=name]\n"
+          "                 [--quiet]\n"
           "       hexir-run --selftest\n");
   return 2;
 }
@@ -67,9 +68,12 @@ int main(int argc, char **argv) {
   const char *entry = "main";
   hexir_device_kind_t kind = HEXIR_DEVICE_CPU;
   int want_selftest = 0;
+  int quiet = 0;
 
   for (int i = 1; i < argc; ++i) {
-    if (strcmp(argv[i], "--selftest") == 0) {
+    if (strcmp(argv[i], "--quiet") == 0 || strcmp(argv[i], "-q") == 0) {
+      quiet = 1;
+    } else if (strcmp(argv[i], "--selftest") == 0) {
       want_selftest = 1;
     } else if (strncmp(argv[i], "--entry=", 8) == 0) {
       entry = argv[i] + 8;
@@ -103,6 +107,7 @@ int main(int argc, char **argv) {
     return 1;
   }
 
+  if (!quiet) {
   printf("module        : %s\n", path);
   printf("version       : %u\n", hexir_module_version(module));
   printf("sections      : %u\n", hexir_module_section_count(module));
@@ -111,6 +116,7 @@ int main(int argc, char **argv) {
     printf("  [%u] %-12s offset=%-10llu size=%llu\n", i,
            hexir_section_kind_string(s->kind),
            (unsigned long long)s->offset, (unsigned long long)s->size);
+  }
   }
 
   hexir_device_t *device = NULL;
@@ -121,8 +127,10 @@ int main(int argc, char **argv) {
     hexir_module_release(module);
     return 1;
   }
-  printf("device        : %s\n", hexir_device_name(device));
-  printf("--\n");
+  if (!quiet) {
+    printf("device        : %s\n", hexir_device_name(device));
+    printf("--\n");
+  }
 
   status = hexir_execute(module, device, entry);
   if (status != HEXIR_OK)

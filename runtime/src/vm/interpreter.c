@@ -76,6 +76,18 @@ static hexir_status_t vm_dispatch(vm_state_t *vm, const uint64_t *operands,
 
   const hexir_executable_entry_t *exe = &vm->executables[index];
 
+  /* The module records where the compiler placed this kernel. Running it
+   * somewhere else would silently produce a right answer from the wrong
+   * device, which is exactly the illusion this project exists to avoid. */
+  if (exe->device != (uint32_t)hexir_device_kind(vm->device)) {
+    fprintf(stderr,
+            "hexir-run: kernel '%s' is placed on %s but the active device is "
+            "%s\n",
+            exe->name, exe->device == 1 ? "cuda" : "cpu",
+            hexir_device_name(vm->device));
+    return HEXIR_ERROR_DEVICE;
+  }
+
   /* Destination is the last argument: prim funcs are destination-passing. */
   double *args[4];
   if (arg_count > 4)
