@@ -13,8 +13,12 @@ Your current LLVM build at /home/user/llvm-project/build is:
 Both of the first two have to change. Without NVPTX, nothing can generate PTX.
 Without the CUDA runner, the JIT has no mgpu* symbols to call.
 
-Machine: 12 cores, 14 GB RAM, 136 GB free. The rebuild is roughly 40-90 min and
-the build dir grows from 3.6 GB to around 6-8 GB.
+Machine: 12 cores, 14 GB RAM, 136 GB free, Ninja build. The rebuild is roughly
+40-90 min and the build dir grows from 3.6 GB to around 6-8 GB.
+
+STEP 2 is already done: the build directory is now configured with X86;NVPTX,
+MLIR_ENABLE_CUDA_RUNNER=ON and CMAKE_CUDA_COMPILER=/usr/bin/nvcc. Start at
+STEP 3.
 
 
 --------------------------------------------------------------------------------
@@ -34,42 +38,67 @@ Verify. Both must resolve, ptxas especially -- it is what compiles PTX to CUBIN:
 STEP 2  Reconfigure the existing LLVM build
 --------------------------------------------------------------------------------
 
-Reuses the cache, so only the parts affected by the new options rebuild. Do not
-delete the build directory; a fresh build takes far longer.
-
     cd /home/user/llvm-project/build
 
     cmake . \
+      -DCMAKE_CUDA_COMPILER=/usr/bin/nvcc \
       -DLLVM_ENABLE_PROJECTS="mlir" \
       -DLLVM_TARGETS_TO_BUILD="X86;NVPTX" \
       -DMLIR_ENABLE_CUDA_RUNNER=ON \
       -DCMAKE_BUILD_TYPE=Release \
       -DLLVM_ENABLE_ASSERTIONS=ON \
+      -DLLVM_PARALLEL_LINK_JOBS=2 \
       -DCMAKE_INSTALL_PREFIX=/usr/local
 
-If cmake complains the cache is stale, point it at the source instead:
+  -DCMAKE_CUDA_COMPILER is not optional here, and this is worth understanding
+  because it costs an hour otherwise.
 
-    cmake -S /home/user/llvm-project/llvm -B /home/user/llvm-project/build \
-      -DLLVM_ENABLE_PROJECTS="mlir" \
-      -DLLVM_TARGETS_TO_BUILD="X86;NVPTX" \
-      -DMLIR_ENABLE_CUDA_RUNNER=ON \
-      -DCMAKE_BUILD_TYPE=Release \
-      -DLLVM_ENABLE_ASSERTIONS=ON \
-      -DCMAKE_INSTALL_PREFIX=/usr/local
+  MLIR's check is:
+
+      CMake Error at mlir/lib/ExecutionEngine/CMakeLists.txt:296 (message):
+        Building the mlir cuda runner requires a working CUDA install
+
+  which fires when CMAKE_CUDA_COMPILER is not set. That variable is set by
+  check_language(CUDA), which CACHES its answer and never searches again. So a
+  configure that ran before the toolkit was installed leaves
+
+      CMAKE_CUDA_COMPILER:FILEPATH=NOTFOUND
+
+  in CMakeCache.txt, and every later configure reuses it -- even though nvcc is
+  now installed and every CUDA library is found. The message blames the CUDA
+  install, but the CUDA install is fine.
+
+  Setting it on the command line overwrites the cached entry. Equivalent:
+
+      cmake -U CMAKE_CUDA_COMPILER .   # then reconfigure
+
+  Confirm it took:
+
+      grep "^CMAKE_CUDA_COMPILER:" CMakeCache.txt
+      # want /usr/bin/nvcc, not NOTFOUND
+
+  On Ubuntu /usr/bin/nvcc is a 4-line wrapper around
+  /usr/lib/nvidia-cuda-toolkit/bin/nvcc. That is fine, CMake handles it, and it
+  also picks gcc-13 as the host compiler by itself -- CUDA 12.4 does not
+  support the gcc 15 that is the system default, so do not override it.
 
 
 --------------------------------------------------------------------------------
 STEP 3  Build
 --------------------------------------------------------------------------------
 
-14 GB of RAM with 12 link jobs will OOM. Cap the linkers:
+This build uses Ninja, not Make. Check with: ls build.ninja
 
-    cmake . -DLLVM_PARALLEL_LINK_JOBS=2
-    make -j$(nproc)
+14 GB of RAM with 12 cores will OOM if every link runs at once, which is what
+LLVM_PARALLEL_LINK_JOBS=2 above prevents.
 
-Or build just what Hexir needs, which is much less than "everything":
+    ninja
 
-    make -j$(nproc) mlir-opt mlir-translate mlir_cuda_runtime mlir_c_runner_utils FileCheck
+Or build only what Hexir needs, which is far less than everything:
+
+    ninja mlir_cuda_runtime mlir_c_runner_utils FileCheck
+
+  (For a Make build the same targets work with make -j$(nproc).)
 
 
 --------------------------------------------------------------------------------
@@ -79,7 +108,7 @@ STEP 4  Install the runtime wrapper
 Hexir's JIT looks for this by absolute path and skips it if absent, which is why
 CPU-only machines still work.
 
-    sudo make install
+    sudo ninja install
 
 Verify:
 
@@ -177,6 +206,10 @@ numbers.
 IF IT FAILS
 --------------------------------------------------------------------------------
 
+  "Building the mlir cuda runner requires a working CUDA install"
+      CMAKE_CUDA_COMPILER is cached as NOTFOUND from a configure that ran
+      before the toolkit was installed. Not a CUDA problem. See step 2.
+
   ptxas not found / "Failed to compile"
       which ptxas ; toolkit not installed or not on PATH
 
@@ -196,3 +229,7 @@ IF IT FAILS
 
   linker OOM during the LLVM build
       cmake . -DLLVM_PARALLEL_LINK_JOBS=1
+
+  "Failed to find LLVM FileCheck" during configure
+      harmless at configure time; FileCheck gets built by the build itself,
+      and Hexir's test suite finds it in llvm-project/build/bin
