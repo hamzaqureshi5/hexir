@@ -127,6 +127,13 @@ lit -v runtime/test --param build_dir=/path/build
 lit -v compiler/test/jit-cpu.mlir         # single test
 ```
 
+There is a third gate besides `cuda`: **`compiler`**, set when the `hexir` binary exists. Tests
+that *produce* a module require it; `runtime/test/fixture-cpu.test` uses the checked-in module at
+`runtime/test/fixtures/mlp-cpu.hxb` instead, so the runtime suite runs on a machine with no MLIR
+at all. That fixture is also what pins the artifact format — regenerate it with
+`hexir -emit=hxb -o runtime/test/fixtures/mlp-cpu.hxb` if the format changes deliberately, and
+treat it failing as a format break otherwise.
+
 `compiler/test/` needs only `hexir`. `runtime/test/` runs `hexir-run`, and holds the artifact
 tests — they invoke `hexir` too, but the behaviour under test is the runtime's, and a test belongs
 with the binary whose behaviour it asserts.
@@ -302,6 +309,11 @@ rewrites — currently all patterns are commented out; only `ConstantOp::fold` i
 - `compiler/` still carries Toy-tutorial provenance in comments and file headers; naming is
   inconsistent (`hexir::FuncOp` vs `func::FuncOp` — the shape-inference pass nests on the
   former, which only exists if `hexir.func` ops are built).
+- **CI covers the runtime only** (`.github/workflows/runtime.yml`): it builds `runtime/`
+  standalone, asserts nothing from the compiler stack got linked in, and runs the runtime suite
+  against the fixture. The compiler is not covered because it needs LLVM **24.0git** — the
+  new-style `OpTy::create(builder, ...)` builders are not in any released LLVM, so no packaged
+  MLIR can build it. That needs a cached LLVM build or a prebuilt container image.
 - **Docs are a Sphinx site in `docs/`**, published to GitHub Pages by
   `.github/workflows/docs.yml`. Pages are MyST Markdown so they read the same on GitHub and on the
   site; diagrams are ```` ```mermaid ```` fences turned into directives by `myst_fence_as_directive`.

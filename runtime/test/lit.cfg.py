@@ -22,5 +22,9 @@ config.test_exec_root = os.path.join(config.hexir_build_dir, "test", "runtime")
 
 if not os.path.exists(config.hexir_run_binary):
     lit_config.fatal(
-        "hexir-run not found at %s -- build with -DHEXIR_BUILD_RUNTIME=ON" % config.hexir_run_binary
+        "hexir-run not found at %s -- build with -DHEXIR_BUILD_RUNTIME=ON"
+        % config.hexir_run_binary
     )
+
+# Tests that need to produce a module are gated `REQUIRES: compiler`; the rest
+# use runtime/test/fixtures and run without one.

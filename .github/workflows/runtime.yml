@@ -1,0 +1,70 @@
+name: runtime
+
+# The runtime is the half of this project that can be tested cheaply.
+#
+# The compiler needs an unreleased LLVM (24.0git, for the new-style op builders),
+# so no packaged MLIR can build it and CI for it needs either a cached LLVM build
+# or a prebuilt container. The runtime needs neither: it is plain C99 with no
+# MLIR and no LLVM, so it builds here in seconds.
+#
+# It is tested against a module checked in at runtime/test/fixtures/, which is
+# also what pins the format -- a change that breaks the reader fails here rather
+# than when someone tries to run an old artifact. Tests that need to *produce* a
+# module are gated `REQUIRES: compiler` and report as unsupported.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install lit and FileCheck
+        run: |
+          set -euo pipefail
+          pip install lit
+          sudo apt-get update
+          # FileCheck lives in llvm-<version>-tools; which versions exist
+          # depends on the runner image, so try a few and check afterwards.
+          sudo apt-get install -y llvm-tools \
+            || sudo apt-get install -y llvm-18-tools \
+            || sudo apt-get install -y llvm-17-tools \
+            || true
+          filecheck=$(ls /usr/lib/llvm-*/bin/FileCheck 2>/dev/null | head -1 || true)
+          if [ -z "$filecheck" ]; then
+            echo "FileCheck not found after install" >&2
+            exit 1
+          fi
+          echo "found $filecheck"
+          dirname "$filecheck" >> "$GITHUB_PATH"
+
+      - name: Build (standalone, no MLIR or LLVM)
+        run: |
+          cmake -S runtime -B build-runtime -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-runtime -j"$(nproc)"
+
+      # The point of the runtime is that deploying does not mean shipping the
+      # compiler. Assert it rather than trusting it.
+      - name: Check nothing MLIR or LLVM got linked in
+        run: |
+          set -euo pipefail
+          ldd build-runtime/hexir-run
+          if ldd build-runtime/hexir-run | grep -qiE 'mlir|llvm'; then
+            echo "the runtime linked something from the compiler stack" >&2
+            exit 1
+          fi
+
+      - name: HAL selftest
+        run: ./build-runtime/hexir-run --selftest
+
+      - name: Run the runtime test suite
+        run: lit -v runtime/test --param build_dir="$PWD/build-runtime"

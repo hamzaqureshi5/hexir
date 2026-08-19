@@ -4,7 +4,7 @@
 // The numbers must match the CPU, which is the point -- the same program, the
 // same answer, a different device, and no compiler in the process.
 //
-// REQUIRES: runtime, cuda
+// REQUIRES: runtime, compiler, cuda
 // RUN: %hexir -emit=hxb -o %t.gpu.hxb -placement=hexir.linear=cuda %s
 // RUN: %hexir -emit=hxb -o %t.cpu.hxb %s
 // RUN: %hexir-run --quiet --device=cuda %t.gpu.hxb > %t.gpu.out

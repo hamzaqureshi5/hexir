@@ -1,7 +1,7 @@
 // Failure paths for the artifact: what the serializer refuses to emit, and
 // what the runtime refuses to load or run.
 //
-// REQUIRES: runtime
+// REQUIRES: runtime, compiler
 
 // An op with no kernel has no place in a host program, and must be reported
 // rather than silently dropped or crashed on. hexir.sigmoid is declared in

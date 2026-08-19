@@ -6,7 +6,7 @@
 // the command list all have to be right for this to hold -- a wrong slot
 // assignment or a swapped matmul operand shows up here as a diff.
 //
-// REQUIRES: runtime
+// REQUIRES: runtime, compiler
 // RUN: %hexir -emit=jit %s > %t.jit
 // RUN: %hexir -emit=hxb -o %t.hxb %s
 // RUN: %hexir-run --quiet %t.hxb > %t.rt

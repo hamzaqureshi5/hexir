@@ -37,9 +37,10 @@ def find_tool(names, extra_dirs=()):
 
 
 filecheck = find_tool(
-    ["FileCheck", "FileCheck-20", "FileCheck-19", "FileCheck-18", "FileCheck-14"],
-    ["/usr/lib/llvm-20/bin", "/usr/lib/llvm-19/bin", "/usr/lib/llvm-18/bin",
-     "/usr/lib/llvm-14/bin"],
+    ["FileCheck", "FileCheck-22", "FileCheck-21", "FileCheck-20", "FileCheck-19",
+     "FileCheck-18", "FileCheck-14"],
+    ["/usr/lib/llvm-22/bin", "/usr/lib/llvm-21/bin", "/usr/lib/llvm-20/bin",
+     "/usr/lib/llvm-19/bin", "/usr/lib/llvm-18/bin", "/usr/lib/llvm-14/bin"],
 )
 if not filecheck:
     lit_config.fatal("FileCheck not found in PATH or /usr/lib/llvm-*/bin")
@@ -58,7 +59,11 @@ config.hexir_run_binary = hexir_run
 if os.path.exists(hexir_run):
     config.substitutions.append(("%hexir-run", hexir_run))
     config.available_features.add("runtime")
+# `compiler` gates tests that need to *produce* a module. The runtime suite is
+# runnable without it: those tests use a checked-in fixture instead, so CI can
+# exercise the runtime on a machine with no MLIR at all.
 if os.path.exists(hexir):
+    config.available_features.add("compiler")
     config.substitutions.append(("%hexir", hexir))
 config.substitutions.append(("FileCheck", filecheck))
 

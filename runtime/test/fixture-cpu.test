@@ -1,0 +1,33 @@
+# The runtime loads and runs a module with no compiler present.
+#
+# The module is checked in rather than produced by %hexir, which is the whole
+# point: this test needs nothing but hexir-run, so it runs in CI on a machine
+# that has no MLIR and no LLVM. It also pins the format -- a change that breaks
+# the reader fails here immediately, rather than only when someone tries to run
+# an old artifact.
+#
+# Regenerate with:  hexir -emit=hxb -o runtime/test/fixtures/mlp-cpu.hxb
+#
+# REQUIRES: runtime
+# RUN: %hexir-run --quiet %S/fixtures/mlp-cpu.hxb | FileCheck %s
+# RUN: %hexir-run %S/fixtures/mlp-cpu.hxb | FileCheck %s --check-prefix=SECTIONS
+# RUN: %hexir-run --selftest | FileCheck %s --check-prefix=SELFTEST
+#
+# A file that is not a module is refused, not followed.
+# RUN: not %hexir-run %s 2>&1 | FileCheck %s --check-prefix=NOTAMODULE
+
+# [[3,1],[2,2]] x [[1,5],[5,2]]
+# CHECK:      8.000000 17.000000
+# CHECK-NEXT: 12.000000 14.000000
+
+# SECTIONS: version       : 2
+# SECTIONS: sections      : 4
+# SECTIONS: symbols
+# SECTIONS: program
+# SECTIONS: rodata
+# SECTIONS: executables
+# SECTIONS: device        : cpu
+
+# SELFTEST: hal roundtrip : ok
+
+# NOTAMODULE: invalid module

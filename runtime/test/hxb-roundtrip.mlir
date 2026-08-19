@@ -2,7 +2,7 @@
 // with hexir-run, which links no MLIR and no LLVM. The numbers must match what
 // the JIT produces for the same program.
 //
-// REQUIRES: runtime
+// REQUIRES: runtime, compiler
 // RUN: %hexir -emit=hxb -o %t.hxb %s
 // RUN: %hexir-run %t.hxb 2>&1 | FileCheck %s
 // RUN: not %hexir-run %t.hxb --entry=nosuchfunc 2>&1 | FileCheck %s --check-prefix=MISSING
