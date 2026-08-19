@@ -76,7 +76,8 @@ hexir_status_t hexir_buffer_read(const hexir_buffer_t *src, void *dst,
 /// the CPU one.
 hexir_status_t hexir_device_launch(hexir_device_t *device, const void *image,
                                    size_t image_size, const char *entry,
-                                   unsigned grid_x, unsigned block_x,
+                                   unsigned grid_x, unsigned grid_y,
+                                   unsigned block_x, unsigned block_y,
                                    hexir_buffer_t **args, unsigned arg_count);
 
 #ifdef __cplusplus

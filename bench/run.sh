@@ -10,7 +10,7 @@
 
 set -euo pipefail
 
-sizes="128,256,512"
+sizes="128,256,512,1024,2048,4096"
 iters=10
 device="cuda"
 build_dir=""

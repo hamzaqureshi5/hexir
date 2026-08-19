@@ -75,9 +75,11 @@ typedef struct {
   uint32_t elem_size; /* bytes per element */
   uint32_t image_offset; /* from the start of EXECUTABLES; 0 if none */
   uint32_t image_size;   /* 0 means descriptor only */
-  uint32_t grid_x;       /* launch geometry, from the bound loop extents */
-  uint32_t block_x;
-  uint32_t reserved;
+  /* Launch geometry, from the bound loop extents. Two dimensions, because a
+   * block caps at 1024 threads: a matrix wider than that has to spread across
+   * blocks, and then rows need an axis of their own. */
+  uint32_t grid_x, grid_y;
+  uint32_t block_x, block_y;
 } hexir_executable_entry_t;
 
 typedef struct {

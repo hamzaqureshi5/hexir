@@ -27,7 +27,7 @@ extern "C" {
 
 #define HEXIR_MODULE_MAGIC "HEXIRMOD"
 #define HEXIR_MODULE_MAGIC_SIZE 8
-#define HEXIR_MODULE_VERSION 2u
+#define HEXIR_MODULE_VERSION 3u
 
 typedef enum {
   /// Exported entry points: name, signature, shapes.

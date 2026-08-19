@@ -57,22 +57,33 @@ static MemRefType bufferTypeFor(Type type) {
 }
 
 /// Create one loop level. `parallel` axes take their kind from the placement;
-/// reduction axes are always serial. `depth` picks the GPU axis to bind to.
+/// reduction axes are always serial. `axis` names the GPU index to bind to and
+/// is only meaningful for a cuda placement.
 static hextir::ForOp makeLoop(OpBuilder &b, Location loc, Value lb, Value ub,
-                              Value step, StringRef device, unsigned depth,
+                              Value step, StringRef device, StringRef axis,
                               bool parallel) {
   StringRef kind = "serial";
   if (parallel)
     kind = device == "cuda" ? "thread_binding" : "parallel";
 
   auto loop = hextir::ForOp::create(b, loc, lb, ub, step, kind);
-
-  if (parallel && device == "cuda") {
-    // Outermost parallel axis maps to blocks, the rest to threads.
-    StringRef axis = depth == 0 ? "blockIdx.x" : "threadIdx.x";
+  if (parallel && device == "cuda" && !axis.empty())
     loop->setAttr("thread", b.getStringAttr(axis));
-  }
   return loop;
+}
+
+/// Threads per block along the mapped axis.
+///
+/// A block cannot exceed 1024 threads, so mapping a whole matrix dimension
+/// onto threadIdx fails outright for anything wider than that. Splitting the
+/// dimension across blocks fixes it, and the split has to divide the extent
+/// evenly because the kernel has no bounds guard yet -- so pick the largest
+/// power of two up to 256 that does.
+static int64_t chooseBlockSize(int64_t extent) {
+  for (int64_t size = 256; size > 1; size /= 2)
+    if (extent % size == 0)
+      return size;
+  return 1;
 }
 
 //===----------------------------------------------------------------------===//
@@ -109,28 +120,50 @@ static void buildMatmulBody(OpBuilder &b, Location loc, hextir::PrimFuncOp fn,
   auto blockTerm = hextir::YieldOp::create(b, loc, ValueRange{});
   b.setInsertionPoint(blockTerm);
 
-  auto iLoop = makeLoop(b, loc, c0, cM, c1, device, /*depth=*/0, true);
+  // i over blocks on y, j split into blocks on x times threads on x. Mapping a
+  // whole dimension onto threadIdx caps the matrix at 1024 wide; this does not.
+  int64_t blockSize = chooseBlockSize(cTy.getShape()[1]);
+  Value cBlock = arith::ConstantIndexOp::create(b, loc, blockSize);
+  Value cTiles =
+      arith::ConstantIndexOp::create(b, loc, cTy.getShape()[1] / blockSize);
+
+  auto iLoop = makeLoop(b, loc, c0, cM, c1, device, "blockIdx.y", true);
   b.setInsertionPointToStart(&iLoop.getBody().front());
 
-  auto jLoop = makeLoop(b, loc, c0, cN, c1, device, /*depth=*/1, true);
-  b.setInsertionPointToStart(&jLoop.getBody().front());
+  auto jOuter = makeLoop(b, loc, c0, cTiles, c1, device, "blockIdx.x", true);
+  b.setInsertionPointToStart(&jOuter.getBody().front());
+
+  auto jInner = makeLoop(b, loc, c0, cBlock, c1, device, "threadIdx.x", true);
+  b.setInsertionPointToStart(&jInner.getBody().front());
 
   Value i = iLoop.getInductionVar();
-  Value j = jLoop.getInductionVar();
+  Value j = arith::AddIOp::create(
+      b, loc, arith::MulIOp::create(b, loc, jOuter.getInductionVar(), cBlock),
+      jInner.getInductionVar());
 
-  // Zero the accumulator before the reduction.
-  hextir::BufferStoreOp::create(b, loc, zero, C, ValueRange{i, j});
-
-  auto kLoop = makeLoop(b, loc, c0, cK, c1, device, /*depth=*/2, false);
+  // The running sum is carried in a register through the reduction, not kept
+  // in C. Reading and writing C on every k costs a global load and a global
+  // store per multiply-add, for a value that never has to leave the thread.
+  auto kLoop = hextir::ForOp::create(b, loc, c0, cK, c1, "serial",
+                                     ValueRange{zero});
   b.setInsertionPointToStart(&kLoop.getBody().front());
   Value k = kLoop.getInductionVar();
+  Value acc = kLoop.getRegionIterArgs()[0];
 
   Value a = hextir::BufferLoadOp::create(b, loc, elemTy, A, ValueRange{i, k});
   Value bv = hextir::BufferLoadOp::create(b, loc, elemTy, B, ValueRange{k, j});
-  Value acc = hextir::BufferLoadOp::create(b, loc, elemTy, C, ValueRange{i, j});
   Value prod = arith::MulFOp::create(b, loc, a, bv);
   Value sum = arith::AddFOp::create(b, loc, acc, prod);
-  hextir::BufferStoreOp::create(b, loc, sum, C, ValueRange{i, j});
+
+  Operation *terminator = kLoop.getBody().front().getTerminator();
+  b.setInsertionPoint(terminator);
+  hextir::YieldOp::create(b, loc, ValueRange{sum});
+  terminator->erase();
+
+  // One store per output element, outside the reduction.
+  b.setInsertionPointAfter(kLoop);
+  hextir::BufferStoreOp::create(b, loc, kLoop.getResult(0), C,
+                                ValueRange{i, j});
 
   b.setInsertionPointToEnd(&entry);
   hextir::ReturnOp::create(b, loc, ValueRange{});
@@ -164,7 +197,8 @@ static void buildElementwiseBody(
   // Every axis of an element-wise op is parallel.
   SmallVector<Value> ivs;
   for (auto [depth, extent] : llvm::enumerate(extents)) {
-    auto loop = makeLoop(b, loc, c0, extent, c1, device, depth, true);
+    StringRef axis = depth == 0 ? "blockIdx.x" : "threadIdx.x";
+    auto loop = makeLoop(b, loc, c0, extent, c1, device, axis, true);
     b.setInsertionPointToStart(&loop.getBody().front());
     ivs.push_back(loop.getInductionVar());
   }

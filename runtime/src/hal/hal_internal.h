@@ -18,7 +18,7 @@ typedef struct hexir_device_vtable_t {
   hexir_status_t (*buffer_read)(const hexir_buffer_t *, void *, size_t);
   void *(*buffer_host_pointer)(hexir_buffer_t *);
   hexir_status_t (*launch)(hexir_device_t *, const void *, size_t,
-                           const char *, unsigned, unsigned,
+                           const char *, unsigned, unsigned, unsigned, unsigned,
                            hexir_buffer_t **, unsigned);
   hexir_status_t (*wait)(hexir_device_t *);
   void (*release)(hexir_device_t *);

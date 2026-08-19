@@ -189,7 +189,8 @@ static void *cuda_buffer_host_pointer(hexir_buffer_t *buffer) {
  * survives the module outliving any one command. */
 static hexir_status_t cuda_launch(hexir_device_t *device, const void *image,
                                   size_t image_size, const char *entry,
-                                  unsigned grid_x, unsigned block_x,
+                                  unsigned grid_x, unsigned grid_y,
+                                  unsigned block_x, unsigned block_y,
                                   hexir_buffer_t **args, unsigned arg_count) {
   (void)device;
   (void)image_size; /* the image is self describing */
@@ -225,8 +226,8 @@ static hexir_status_t cuda_launch(hexir_device_t *device, const void *image,
     params[i] = &addresses[i];
   }
 
-  result = cu.LaunchKernel(function, grid_x, 1, 1, block_x, 1, 1, 0, NULL,
-                           params, NULL);
+  result = cu.LaunchKernel(function, grid_x, grid_y, 1, block_x, block_y, 1, 0,
+                           NULL, params, NULL);
   if (result != CUDA_SUCCESS) {
     fprintf(stderr, "hexir: launch of '%s' failed: %s\n", entry,
             cuda_error(result));

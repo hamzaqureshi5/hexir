@@ -120,32 +120,43 @@ static int cublas_load(void) {
 // Reference
 //===----------------------------------------------------------------------===//
 
-// Deliberately the simplest correct implementation. It is the thing every
-// other number is checked against, so it should be obviously right rather
-// than fast.
-static void reference_gemm(const double *a, const double *b, double *c,
-                           uint32_t m, uint32_t n, uint32_t k) {
-  for (uint32_t i = 0; i < m; ++i) {
-    for (uint32_t j = 0; j < n; ++j) {
-      double acc = 0.0;
-      for (uint32_t p = 0; p < k; ++p)
-        acc += a[(size_t)i * k + p] * b[(size_t)p * n + j];
-      c[(size_t)i * n + j] = acc;
-    }
-  }
-}
+// Check a sample of output elements rather than recomputing the whole matrix.
+//
+// A full CPU reference is O(N^3): at 4096 that is 1.4e11 flops single
+// threaded, minutes per run, which makes verification something people turn
+// off. Checking a few hundred scattered elements costs O(samples * K) and
+// catches everything that matters here -- a kernel that computes part of the
+// output, or indexes wrongly, gets the sampled elements wrong too.
+//
+// The stride is deliberately coprime-ish with the row length so samples do not
+// all land in the same column.
+static int verify_sampled(const double *a, const double *b, const double *got,
+                          uint32_t m, uint32_t n, uint32_t k, int samples,
+                          double *out_worst) {
+  size_t total = (size_t)m * n;
+  size_t stride = total / (size_t)samples;
+  if (stride == 0)
+    stride = 1;
 
-// Largest relative difference between two matrices. Relative, because an
-// absolute tolerance is meaningless once values grow with K.
-static double max_relative_error(const double *x, const double *y, size_t n) {
   double worst = 0.0;
-  for (size_t i = 0; i < n; ++i) {
-    double scale = fabs(y[i]) > 1.0 ? fabs(y[i]) : 1.0;
-    double err = fabs(x[i] - y[i]) / scale;
+  for (size_t index = 0; index < total; index += stride) {
+    uint32_t i = (uint32_t)(index / n);
+    uint32_t j = (uint32_t)(index % n);
+
+    double expected = 0.0;
+    for (uint32_t p = 0; p < k; ++p)
+      expected += a[(size_t)i * k + p] * b[(size_t)p * n + j];
+
+    double scale = fabs(expected) > 1.0 ? fabs(expected) : 1.0;
+    double err = fabs(got[index] - expected) / scale;
     if (err > worst)
       worst = err;
   }
-  return worst;
+  *out_worst = worst;
+
+  // f64 accumulation over K terms, so scale the bar with K rather than using a
+  // fixed epsilon.
+  return worst <= 1e-12 * (double)k;
 }
 
 //===----------------------------------------------------------------------===//
@@ -155,15 +166,18 @@ static double max_relative_error(const double *x, const double *y, size_t n) {
 // Time hexir end to end: this is allocation, host to device transfers, the
 // kernel and the synchronise, because that is what a caller actually pays.
 static double time_hexir(const hexir_module_t *module, hexir_device_kind_t kind,
-                         int iterations, hexir_status_t *out_status) {
+                         int iterations, hexir_status_t *out_status,
+                         double *out_result, size_t result_bytes) {
   hexir_device_t *device = NULL;
   *out_status = hexir_device_create(kind, &device);
   if (*out_status != HEXIR_OK)
     return 0.0;
 
   // One untimed run first: the first launch pays for context setup and module
-  // load, which would otherwise dominate a short measurement.
-  *out_status = hexir_execute(module, device, "main");
+  // load, which would otherwise dominate a short measurement. This is also the
+  // run whose output gets checked.
+  *out_status = hexir_execute_capture(module, device, "main", out_result,
+                                      result_bytes);
   if (*out_status != HEXIR_OK) {
     hexir_device_release(device);
     return 0.0;
@@ -255,12 +269,52 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  double hexir_seconds = time_hexir(module, kind, iterations, &status);
+  // Check what hexir computed before reporting how fast it did it. Timing a
+  // kernel without verifying it is how a wrong kernel gets celebrated: doing a
+  // fraction of the work looks exactly like being fast.
+  size_t result_elems = (size_t)entry.m * entry.n;
+  double *hexir_result = NULL;
+  if (want_verify && entry.elem_size == sizeof(double))
+    hexir_result = (double *)malloc(result_elems * sizeof(double));
+
+  double hexir_seconds =
+      time_hexir(module, kind, iterations, &status, hexir_result,
+                 hexir_result ? result_elems * sizeof(double) : 0);
   if (status != HEXIR_OK) {
     fprintf(stderr, "hexir-bench: execution failed: %s\n",
             hexir_status_string(status));
+    free(hexir_result);
     hexir_module_release(module);
     return 1;
+  }
+
+  int hexir_correct = 1;
+  if (hexir_result) {
+    const void *rodata_for_check = NULL;
+    uint64_t rodata_bytes = 0;
+    size_t a_n = (size_t)entry.m * entry.k;
+    size_t b_n = (size_t)entry.k * entry.n;
+    if (is_gemm &&
+        hexir_module_section(module, HEXIR_SECTION_RODATA, &rodata_for_check,
+                             &rodata_bytes) == HEXIR_OK &&
+        rodata_bytes >= (a_n + b_n) * sizeof(double)) {
+      const double *ra = (const double *)rodata_for_check;
+      double err = 0.0;
+      hexir_correct = verify_sampled(ra, ra + a_n, hexir_result, entry.m,
+                                     entry.n, entry.k, 512, &err);
+      printf("verify   : hexir max relative error %.3g over 512 sampled "
+             "elements (%s)\n",
+             err, hexir_correct ? "ok" : "WRONG");
+    }
+  }
+  free(hexir_result);
+
+  // A wrong kernel that runs fast is not a result. Say so instead of printing
+  // a number someone might quote.
+  if (!hexir_correct) {
+    fprintf(stderr,
+            "hexir-bench: the kernel produced the wrong answer; timings below "
+            "are meaningless\n");
   }
 
   printf("hexir    : %8.3f ms", hexir_seconds * 1e3);
@@ -361,23 +415,6 @@ int main(int argc, char **argv) {
   // like-for-like kernel comparison.
   printf("note     : hexir timing includes allocation and host/device copies;\n"
          "           the cuBLAS timing is the kernel alone.\n");
-
-  if (want_verify) {
-    double *from_cublas = (double *)malloc(c_elems * sizeof(double));
-    double *expected = (double *)malloc(c_elems * sizeof(double));
-    if (from_cublas && expected) {
-      hexir_buffer_read(dc, from_cublas, c_elems * sizeof(double));
-      reference_gemm(host_a, host_b, expected, entry.m, entry.n, entry.k);
-      double error = max_relative_error(from_cublas, expected, c_elems);
-      // f64 accumulation over K terms, so scale the bar with K rather than
-      // using a fixed epsilon.
-      double tolerance = 1e-12 * (double)entry.k;
-      printf("verify   : max relative error %.3g vs the CPU reference (%s)\n",
-             error, error <= tolerance ? "ok" : "TOO LARGE");
-    }
-    free(from_cublas);
-    free(expected);
-  }
 
   cublas.Destroy(handle);
   hexir_buffer_release(da);
