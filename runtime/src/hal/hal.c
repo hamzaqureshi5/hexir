@@ -67,6 +67,10 @@ void *hexir_buffer_host_pointer(hexir_buffer_t *buffer) {
   return buffer->device->vtable->buffer_host_pointer(buffer);
 }
 
+void *hexir_buffer_device_pointer(hexir_buffer_t *buffer) {
+  return buffer ? buffer->impl : NULL;
+}
+
 hexir_status_t hexir_buffer_write(hexir_buffer_t *dst, const void *src,
                                   size_t size) {
   if (!dst || !src)

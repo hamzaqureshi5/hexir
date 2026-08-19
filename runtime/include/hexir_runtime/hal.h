@@ -56,6 +56,12 @@ hexir_memory_kind_t hexir_buffer_memory_kind(const hexir_buffer_t *buffer);
 /// NULL when the buffer is DEVICE_LOCAL: use write/read instead.
 void *hexir_buffer_host_pointer(hexir_buffer_t *buffer);
 
+/// The backend's raw address for this buffer: a device address for CUDA, a
+/// host address for CPU. Exists so a buffer can be handed to another library
+/// that speaks the same device -- cuBLAS in the benchmark, for instance --
+/// without copying it out and back.
+void *hexir_buffer_device_pointer(hexir_buffer_t *buffer);
+
 hexir_status_t hexir_buffer_write(hexir_buffer_t *dst, const void *src,
                                   size_t size);
 hexir_status_t hexir_buffer_read(const hexir_buffer_t *src, void *dst,

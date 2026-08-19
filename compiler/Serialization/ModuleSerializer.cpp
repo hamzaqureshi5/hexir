@@ -289,9 +289,18 @@ struct Serializer {
         auto type = cast<RankedTensorType>(constant.getType());
 
         uint64_t offset = rodata.size();
-        // Raw data goes in verbatim: the runtime uses it from the mapping.
+        uint64_t bytes = byteSize(type);
+
+        // A splat stores one element, however large the tensor is, so writing
+        // getRawData() verbatim would emit 8 bytes for a 256x256 matrix and
+        // the runtime would reject the module. Expand it.
         llvm::ArrayRef<char> raw = dense.getRawData();
-        rodata.raw(raw.data(), raw.size());
+        if (dense.isSplat()) {
+          for (uint64_t written = 0; written < bytes; written += raw.size())
+            rodata.raw(raw.data(), raw.size());
+        } else {
+          rodata.raw(raw.data(), raw.size());
+        }
         rodata.padTo(8);
 
         uint64_t slot = assignSlot(constant.getResult());
