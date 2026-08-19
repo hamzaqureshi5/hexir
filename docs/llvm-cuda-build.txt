@@ -1,0 +1,198 @@
+================================================================================
+Building LLVM/MLIR with CUDA support, for Hexir
+================================================================================
+
+Your current LLVM build at /home/user/llvm-project/build is:
+
+    LLVM_TARGETS_TO_BUILD   = host        <- X86 only, no NVPTX
+    MLIR_ENABLE_CUDA_RUNNER = 0           <- no libmlir_cuda_runtime.so
+    CMAKE_BUILD_TYPE        = Release
+    LLVM_ENABLE_ASSERTIONS  = ON
+    CMAKE_INSTALL_PREFIX    = /usr/local
+
+Both of the first two have to change. Without NVPTX, nothing can generate PTX.
+Without the CUDA runner, the JIT has no mgpu* symbols to call.
+
+Machine: 12 cores, 14 GB RAM, 136 GB free. The rebuild is roughly 40-90 min and
+the build dir grows from 3.6 GB to around 6-8 GB.
+
+
+--------------------------------------------------------------------------------
+STEP 1  Install the CUDA toolkit  (provides nvcc, ptxas, libcuda)
+--------------------------------------------------------------------------------
+
+    sudo apt update
+    sudo apt install nvidia-cuda-toolkit
+
+Verify. Both must resolve, ptxas especially -- it is what compiles PTX to CUBIN:
+
+    nvcc --version
+    which ptxas
+
+
+--------------------------------------------------------------------------------
+STEP 2  Reconfigure the existing LLVM build
+--------------------------------------------------------------------------------
+
+Reuses the cache, so only the parts affected by the new options rebuild. Do not
+delete the build directory; a fresh build takes far longer.
+
+    cd /home/user/llvm-project/build
+
+    cmake . \
+      -DLLVM_ENABLE_PROJECTS="mlir" \
+      -DLLVM_TARGETS_TO_BUILD="X86;NVPTX" \
+      -DMLIR_ENABLE_CUDA_RUNNER=ON \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DLLVM_ENABLE_ASSERTIONS=ON \
+      -DCMAKE_INSTALL_PREFIX=/usr/local
+
+If cmake complains the cache is stale, point it at the source instead:
+
+    cmake -S /home/user/llvm-project/llvm -B /home/user/llvm-project/build \
+      -DLLVM_ENABLE_PROJECTS="mlir" \
+      -DLLVM_TARGETS_TO_BUILD="X86;NVPTX" \
+      -DMLIR_ENABLE_CUDA_RUNNER=ON \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DLLVM_ENABLE_ASSERTIONS=ON \
+      -DCMAKE_INSTALL_PREFIX=/usr/local
+
+
+--------------------------------------------------------------------------------
+STEP 3  Build
+--------------------------------------------------------------------------------
+
+14 GB of RAM with 12 link jobs will OOM. Cap the linkers:
+
+    cmake . -DLLVM_PARALLEL_LINK_JOBS=2
+    make -j$(nproc)
+
+Or build just what Hexir needs, which is much less than "everything":
+
+    make -j$(nproc) mlir-opt mlir-translate mlir_cuda_runtime mlir_c_runner_utils FileCheck
+
+
+--------------------------------------------------------------------------------
+STEP 4  Install the runtime wrapper
+--------------------------------------------------------------------------------
+
+Hexir's JIT looks for this by absolute path and skips it if absent, which is why
+CPU-only machines still work.
+
+    sudo make install
+
+Verify:
+
+    ls -la /usr/local/lib/libmlir_cuda_runtime.so
+    ls -la /usr/local/lib/libmlir_c_runner_utils.so
+
+Verify NVPTX actually got built:
+
+    /home/user/llvm-project/build/bin/llc --version | grep -i nvptx
+
+
+--------------------------------------------------------------------------------
+STEP 5  Rebuild Hexir against it
+--------------------------------------------------------------------------------
+
+    cd /home/user/hexir/build
+    cmake .. -DCMAKE_BUILD_TYPE=Release
+    make -j$(nproc)
+
+
+--------------------------------------------------------------------------------
+STEP 6  Verify, in this order
+--------------------------------------------------------------------------------
+
+Each step depends on the one before, so do not skip ahead when one fails.
+
+  1. CPU baseline still works.  Expect: 8 17 / 12 14
+
+     ./build/hexir -emit=jit
+
+  2. GPU IR generates.  Expect a gpu.launch with device = "cuda"
+
+     ./build/hexir -emit=mlir-gpu -placement=hexir.linear=cuda
+
+  3. The kernel compiles to a binary.  This is the first step that needs ptxas.
+     Expect a gpu.binary blob and mgpuModuleLoad / mgpuLaunchKernel calls.
+
+     ./build/hexir -emit=mlir-llvm -placement=hexir.linear=cuda 2>&1 \
+       | grep -E "gpu.binary|mgpu" | head
+
+  4. Run it on the GPU.  Expect the same numbers as step 1.
+
+     ./build/hexir -emit=jit -placement=hexir.linear=cuda
+
+  5. Full suite. The three cuda-gated tests un-skip once nvcc is on PATH.
+     Expect 14 passed, 0 unsupported.
+
+     cd build && make check-hexir
+
+
+--------------------------------------------------------------------------------
+TWO THINGS IN HEXIR STILL NEED FIXING FIRST
+--------------------------------------------------------------------------------
+
+Neither is about the toolkit. Step 6.4 will fail even after all of the above
+until they are done.
+
+  a) Wrong target architecture.
+
+     include/hexir/Pipelines/Pipelines.h:43 hardcodes sm_86, which is an A6000.
+     Your GTX 1660 Ti is compute capability 7.5, so it needs sm_75. A wrong arch
+     gives CUDA_ERROR_NO_BINARY_FOR_GPU at launch, not at compile.
+
+  b) Translation interfaces are registered too late.
+
+     tools/hexir/hexir.cpp calls registerGPUDialectTranslation and
+     registerNVVMDialectTranslation at lines 257 and 308, inside dumpLLVMIR and
+     runJit. Those run AFTER buildHexirPipeline at line 233, and it is the
+     pipeline -- gpu-module-to-binary -- that needs them. They have to move into
+     main() before loadAndProcessMLIR.
+
+     Current symptom, with or without a toolkit:
+
+       error: cannot be converted to LLVM IR: missing
+       `LLVMTranslationDialectInterface` registration for dialect for op:
+       gpu.module
+
+
+--------------------------------------------------------------------------------
+EXPECT IT TO BE SLOW
+--------------------------------------------------------------------------------
+
+The generated kernel launches with one block and one thread, and its body is a
+sequential loop nest (compiler/Conversion/CudaToGpu/CudaToGpu.cpp, all six
+launch dimensions are c1). One CUDA core running a scalar loop loses badly to a
+CPU at any size. It is correct, not fast. Do not benchmark it and conclude
+anything about GPUs.
+
+There are also no host-to-device transfers in the generated code. An all-GPU
+placement may work; a split CPU/GPU placement can silently produce wrong
+numbers.
+
+
+--------------------------------------------------------------------------------
+IF IT FAILS
+--------------------------------------------------------------------------------
+
+  ptxas not found / "Failed to compile"
+      which ptxas ; toolkit not installed or not on PATH
+
+  undefined mgpu* symbols at JIT time
+      libmlir_cuda_runtime.so missing; MLIR_ENABLE_CUDA_RUNNER was not ON,
+      or sudo make install was skipped
+
+  CUDA_ERROR_NO_BINARY_FOR_GPU
+      arch mismatch; see (a) above, set sm_75
+
+  missing LLVMTranslationDialectInterface for gpu.module
+      see (b) above; registration order, not the toolkit
+
+  no NVPTX target
+      LLVM_TARGETS_TO_BUILD did not include NVPTX; check with
+      llc --version | grep -i nvptx
+
+  linker OOM during the LLVM build
+      cmake . -DLLVM_PARALLEL_LINK_JOBS=1
