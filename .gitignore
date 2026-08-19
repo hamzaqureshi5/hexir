@@ -12,3 +12,6 @@ docs/_build/
 
 # Local guidance for AI assistants; not part of the project
 CLAUDE.md
+
+# Benchmark run output
+bench/work/

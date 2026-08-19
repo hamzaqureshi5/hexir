@@ -5,6 +5,31 @@ work on the same device, with a correctness check against a CPU reference.
 Without a baseline a GFLOPS figure means nothing, so all three are always
 reported together.
 
+## The script
+
+`bench/run.sh` compiles each size and runs it, then prints a table:
+
+```bash
+bench/run.sh                                    # default sweep on the GPU
+bench/run.sh --sizes=256,512,1024 --iters=20
+bench/run.sh --device=cpu                       # the CPU path, no baseline
+bench/run.sh --build=/path/to/build             # a build tree elsewhere
+```
+
+```text
+size              hexir         cuBLAS          ratio     verify
+----              -----         ------          -----     ------
+128x128        16.93 GF/s      100.31 GF/s    5.9x slower         ok
+256x256        35.97 GF/s      100.25 GF/s    2.8x slower         ok
+512x512        54.76 GF/s      140.52 GF/s    2.6x slower         ok
+1024x1024      61.01 GF/s      164.34 GF/s    2.7x slower         ok
+```
+
+Generated sources, modules and full reports land in `bench/work/`, which is
+gitignored.
+
+## The tool underneath
+
 ```bash
 hexir -emit=hxb -o /tmp/g512.hxb -placement=hexir.linear=cuda bench/gemm/gemm-512.mlir
 hexir-bench /tmp/g512.hxb --iters=10
