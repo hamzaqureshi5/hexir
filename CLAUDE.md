@@ -101,6 +101,11 @@ than the CUDA runtime API, so it can be dlopened.
 
 `hexir-run --selftest` exercises the HAL without needing a module.
 
+`tools/hxb-dump.py` reads a module and prints its sections, disassembles the command list, shows
+rodata as f64, and with `--image <kernel>` extracts the device image (then `cuobjdump --dump-sass`
+on it). It is a deliberate second implementation of the format reader — when it and the runtime
+disagree, one of them is wrong.
+
 `targets/` is **not** part of the build and references a nonexistent `ppytorch_core` — inert
 scaffolding. Per the architecture discussion those directories are the natural home for runtime
 HAL backends, not compiler backends.

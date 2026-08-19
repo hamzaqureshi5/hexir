@@ -149,6 +149,53 @@ the runtime supplies the body from `reference_kernels.c`. Embedding a host
 object would close that gap the same way, without changing the container.
 :::
 
+## Inspecting a module
+
+`tools/hxb-dump.py` reads a `.hxb` and prints what is in it. It is a second,
+independent implementation of the format reader — if it and the runtime
+disagree, one of them is wrong, and the Python one is much easier to argue
+with.
+
+```
+$ tools/hxb-dump.py gpu.hxb --rodata
+version 2, flags 0x0, 4 sections
+  symbols      offset=120      size=40
+  program      offset=160      size=176
+  rodata       offset=336      size=64
+  executables  offset=400      size=3632
+
+program
+  main:
+    const     slot=0 rodata_offset=0 bytes=32
+    const     slot=1 rodata_offset=32 bytes=32
+    alloc     slot=2 bytes=32
+    dispatch  executable=0 argc=3 %0 %1 %2
+    print     slot=2 rows=2 cols=2
+    end
+
+rodata  64 bytes (8 f64)
+    +0     3  1  2  2
+    +32    1  5  5  2
+
+executables  (1)
+  linear_0         matmul cuda    2x2x2  elem=8B
+    device image   3544 bytes, fatbin   launch grid=2 block=2
+```
+
+`--image <kernel>` writes the device image out, which can then be disassembled:
+
+```
+$ tools/hxb-dump.py gpu.hxb --image linear_0
+$ cuobjdump --dump-sass linear_0.bin
+        code for sm_75
+                Function : linear_0
+        MOV R1, c[0x0][0x28] ;
+        S2R R4, SR_CTAID.X ;
+```
+
+That `SR_CTAID.X` is the block index — the `hextir.for "thread_binding" ... bind
+"blockIdx.x"` loop, all the way down to SASS.
+
 ## Commands
 
 ```text
