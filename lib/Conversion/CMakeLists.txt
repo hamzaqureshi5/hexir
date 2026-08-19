@@ -1,0 +1,6 @@
+add_subdirectory(HexirToLinalg)
+add_subdirectory(HexirToTIR)
+add_subdirectory(HexirToAffine)
+add_subdirectory(HexirToLLVM)
+add_subdirectory(LSToLinalg)
+add_subdirectory(CudaToGpu)

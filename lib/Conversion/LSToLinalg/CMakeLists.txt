@@ -1,0 +1,1 @@
+hexir_library(LSToLinalg LSToLinalg.cpp DEPENDS LSDialectsIncGen HexirOpsIncGen)

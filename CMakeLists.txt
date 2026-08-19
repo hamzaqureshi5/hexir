@@ -3,73 +3,45 @@ project(hexir LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED YES)
-
-
-
-set(LLVM_DIR "/home/user/llvm-project/build/lib/cmake/llvm")
-set(MLIR_DIR "/home/user/llvm-project/build/lib/cmake/mlir")
-
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Point these at your LLVM/MLIR build, or pass -DLLVM_DIR=... -DMLIR_DIR=...
+if(NOT DEFINED LLVM_DIR)
+  set(LLVM_DIR "/home/user/llvm-project/build/lib/cmake/llvm")
+endif()
+if(NOT DEFINED MLIR_DIR)
+  set(MLIR_DIR "/home/user/llvm-project/build/lib/cmake/mlir")
+endif()
 
 find_package(LLVM REQUIRED CONFIG)
 find_package(MLIR REQUIRED CONFIG)
 
 list(APPEND CMAKE_MODULE_PATH "${MLIR_CMAKE_DIR}")
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 include(AddLLVM)
 include(AddMLIR)
 include(TableGen)
 include(HandleLLVMOptions)
+include(HexirLibrary)
 
 set(LLVM_LINK_COMPONENTS Core Support nativecodegen OrcJIT)
 
-include_directories(include)
-
-include_directories(
-  ${LLVM_INCLUDE_DIRS} ${MLIR_INCLUDE_DIRS} 
-  ${CMAKE_CURRENT_SOURCE_DIR}/include
-  ${CMAKE_CURRENT_SOURCE_DIR}/include/Dialects
-  ${CMAKE_CURRENT_BINARY_DIR}/include # For TableGen-generated .inc files
-  ${CMAKE_CURRENT_BINARY_DIR}/include/Dialects # For TableGen-generated .inc files
-  ${CMAKE_CURRENT_BINARY_DIR})
-
 add_definitions(${LLVM_DEFINITIONS})
 
-add_subdirectory(include)
-
-
-
-set(LLVM_TARGET_DEFINITIONS src/HexirCombine.td)
-mlir_tablegen(HexirCombine.inc -gen-rewriters)
-add_public_tablegen_target(CombineIncGen)
-
-
-file(
-  GLOB CCMLIR_SRC CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
-                                  "${CMAKE_CURRENT_SOURCE_DIR}/src/Dialects/*.cpp"
-  # GLOB CCMLIR_SRC "${CMAKE_CURRENT_SOURCE_DIR}/targets/cpu/*.cpp"
-  # GLOB CCMLIR_SRC "${CMAKE_CURRENT_SOURCE_DIR}/targets/gpu/*.cpp"
-  # GLOB CCMLIR_SRC "${CMAKE_CURRENT_SOURCE_DIR}/targets/metal/*.cpp"
-  # GLOB CCMLIR_SRC "${CMAKE_CURRENT_SOURCE_DIR}/targets/cpu/*.cpp"
-  # GLOB CCMLIR_SRC "${CMAKE_CURRENT_SOURCE_DIR}/targets/rocm/*.cpp"
-)
-add_executable(hexir ${CCMLIR_SRC})
-
-
-# add_dependencies(hexir Ops ShapeInfer CombineIncGen)
-add_dependencies(hexir OpsIncGen LSDialectsIncGen HexTIRIncGen
-                 ShapeInferenceInterfaceIncGen CombineIncGen)
-
-llvm_update_compile_flags(hexir)
+include_directories(
+  ${LLVM_INCLUDE_DIRS}
+  ${MLIR_INCLUDE_DIRS}
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+  ${CMAKE_CURRENT_BINARY_DIR}/include)
 
 get_property(dialect_libs GLOBAL PROPERTY MLIR_DIALECT_LIBS)
 get_property(conversion_libs GLOBAL PROPERTY MLIR_CONVERSION_LIBS)
 get_property(extension_libs GLOBAL PROPERTY MLIR_EXTENSION_LIBS)
 
-target_link_libraries(
-  hexir
-  PRIVATE ${dialect_libs}
+# Shared by every hexir library and by the driver. See cmake/HexirLibrary.cmake.
+set(HEXIR_MLIR_LIBS
+          ${dialect_libs}
           ${conversion_libs}
           ${extension_libs}
           LLVMSupport
@@ -146,7 +118,11 @@ target_link_libraries(
           MLIRNVVMTarget
           LLVMSupport)
 
-install(TARGETS hexir RUNTIME DESTINATION bin)
+# include/ generates the TableGen .inc files; lib/ builds the module libraries
+# and registers them in the HEXIR_LIBS global property; tools/ links them.
+add_subdirectory(include)
+add_subdirectory(lib)
+add_subdirectory(tools)
 
 # Lit test suite: `make check-hexir` runs FileCheck tests in test/.
 find_program(LLVM_LIT_EXECUTABLE NAMES llvm-lit lit)

@@ -1,0 +1,6 @@
+set(LLVM_TARGET_DEFINITIONS HexTIROps.td)
+mlir_tablegen(HexTIROps.h.inc -gen-op-decls)
+mlir_tablegen(HexTIROps.cpp.inc -gen-op-defs)
+mlir_tablegen(HexTIRDialect.h.inc -gen-dialect-decls -dialect=hextir)
+mlir_tablegen(HexTIRDialect.cpp.inc -gen-dialect-defs -dialect=hextir)
+add_public_tablegen_target(HexTIROpsIncGen)

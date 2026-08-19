@@ -1,0 +1,1 @@
+hexir_library(HexirToAffine HexirToAffine.cpp DEPENDS HexirOpsIncGen)

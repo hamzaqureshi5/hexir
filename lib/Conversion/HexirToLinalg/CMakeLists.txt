@@ -1,0 +1,1 @@
+hexir_library(HexirToLinalg HexirToLinalg.cpp DEPENDS HexirOpsIncGen)
