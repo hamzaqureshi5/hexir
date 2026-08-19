@@ -21,6 +21,7 @@
 #include "hexir_runtime/program.h"
 
 #include "hexir/Conversion/Passes.h"
+#include "hexir/Target/CudaToolkit.h"
 
 #include "mlir/Conversion/GPUToNVVM/GPUToNVVMPass.h"
 #include "mlir/Conversion/ReconcileUnrealizedCasts/ReconcileUnrealizedCasts.h"
@@ -175,7 +176,11 @@ struct Serializer {
       // A partial conversion: without this the leftover casts make the
       // translation to LLVM IR fail.
       pm.nest<gpu::GPUModuleOp>().addPass(createReconcileUnrealizedCastsPass());
-      pm.addPass(createGpuModuleToBinaryPass());
+      GpuModuleToBinaryPassOptions binaryOpts;
+      // Ubuntu does not lay the toolkit out the way MLIR expects; see
+      // compiler/Target/CudaToolkit.cpp.
+      binaryOpts.toolkitPath = mlir::hexir::resolveCudaToolkitPath();
+      pm.addPass(createGpuModuleToBinaryPass(binaryOpts));
 
       if (failed(pm.run(*clone))) {
         module.emitWarning("could not compile cuda kernels to device code; the "

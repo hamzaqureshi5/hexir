@@ -308,4 +308,10 @@ rewrites — currently all patterns are commented out; only `ConstantOp::fold` i
   Build locally with `pip install -r docs/requirements.txt && sphinx-build -W -b html docs docs/_build/html`.
   CI uses `-W`, so a broken link or a page missing from a toctree fails the build. Pygments has no
   MLIR lexer, so `misc.highlighting_failure` is suppressed in `conf.py`.
+- **`libdevice` is found automatically** (`compiler/Target/CudaToolkit.cpp`). MLIR looks for it at
+  exactly `<toolkit>/nvvm/libdevice/libdevice.10.bc`; Ubuntu's package puts it in
+  `/usr/lib/nvidia-cuda-toolkit/libdevice/` with no `nvvm` directory, giving
+  `error: LibDevice path: /usr/nvvm/... does not exist` — which reads like a broken CUDA install
+  and is not one. Hexir locates libdevice and builds a symlink directory under the user cache that
+  satisfies the lookup. `CUDA_ROOT`/`CUDA_HOME`/`CUDA_PATH` override it.
 - `docs/cuda-server.md` is the runbook for the A6000/sm_86 setup and the failure/symptom table.

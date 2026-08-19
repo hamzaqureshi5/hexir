@@ -144,6 +144,13 @@ Kernels are built with **bare-pointer calling convention**, so each argument is
 one device address rather than MLIR's seven-scalar memref descriptor. That is
 what keeps `cuLaunchKernel` in the runtime simple.
 
+Compiling one needs `libdevice`, which MLIR looks for at exactly
+`<toolkit>/nvvm/libdevice/libdevice.10.bc`. Ubuntu's package does not use that
+layout, so Hexir finds `libdevice` wherever the distribution put it and builds a
+small directory of symlinks that satisfies the lookup
+(`compiler/Target/CudaToolkit.cpp`). `CUDA_ROOT`, `CUDA_HOME` or `CUDA_PATH`
+override it.
+
 A cpu kernel still carries only a descriptor — kind, extents, placement — and
 the runtime supplies the body from `reference_kernels.c`. Embedding a host
 object would close that gap the same way, without changing the container.

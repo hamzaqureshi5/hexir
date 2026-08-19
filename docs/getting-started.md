@@ -89,8 +89,34 @@ You can move more than one at a time:
 ./build/hexir -emit=mlir-tir -placement=hexir.linear=cuda,hexir.relu=cpu mine.mlir
 ```
 
-Actually *executing* on the GPU needs a CUDA toolkit. See
+## Run it on the GPU
+
+With a CUDA toolkit installed and LLVM built for NVPTX, a GPU-placed kernel
+compiles to a CUBIN that gets embedded in the module:
+
+```bash
+./build/hexir -emit=hxb -o gpu.hxb -placement=hexir.linear=cuda mine.mlir
+./build/hexir-run --device=cuda gpu.hxb
+```
+
+```text
+device        : cuda (NVIDIA GeForce GTX 1660 Ti)
+--
+8.000000 17.000000
+12.000000 14.000000
+```
+
+No environment setup is needed: Hexir finds `libdevice` itself, including on
+distributions that do not use NVIDIA's directory layout. Build instructions for
+LLVM are in `docs/llvm-cuda-build.txt`, and the setup runbook is
 [Running on a CUDA server](cuda-server.md).
+
+:::{warning}
+`-emit=jit` with a CUDA placement currently faults. The generated host code
+passes host pointers to the device with no transfers. The artifact path above
+does not have this problem, because the runtime allocates device-local buffers
+and copies into them.
+:::
 
 ## Ship a file instead
 
@@ -112,5 +138,4 @@ cd build && make check-hexir             # both suites
 cd build && make check-hexir-runtime     # just the runtime
 ```
 
-Some checked-in tests currently fail. That is a known state, not a broken
-build — see the note in `CLAUDE.md`.
+All 15 pass. Three need a CUDA toolkit and report as unsupported without one.

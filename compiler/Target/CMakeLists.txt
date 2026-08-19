@@ -1,1 +1,1 @@
-hexir_library(HexirTarget TargetInfo.cpp DEPENDS HexirOpsIncGen)
+hexir_library(HexirTarget TargetInfo.cpp CudaToolkit.cpp DEPENDS HexirOpsIncGen)

@@ -8,6 +8,7 @@
 #include "hexir/Pipelines/Pipelines.h"
 
 #include "hexir/Conversion/Passes.h"
+#include "hexir/Target/CudaToolkit.h"
 #include "hexir/Dialect/Hexir/IR/HexirDialect.h"
 #include "hexir/Dialect/Hexir/Transforms/Passes.h"
 
@@ -171,7 +172,11 @@ void mlir::hexir::buildHexirPipeline(PassManager &pm,
     // gpu-to-llvm. Leave gpu.launch_func standing for the next pass.
     pm.addPass(mlir::hexir::createLowerToLLVMPass());
     pm.addPass(createGpuToLLVMConversionPass());
-    pm.addPass(createGpuModuleToBinaryPass());
+    GpuModuleToBinaryPassOptions binaryOpts;
+    // Ubuntu does not lay the toolkit out the way MLIR expects; see
+    // compiler/Target/CudaToolkit.cpp.
+    binaryOpts.toolkitPath = mlir::hexir::resolveCudaToolkitPath();
+    pm.addPass(createGpuModuleToBinaryPass(binaryOpts));
   }
 
   //===--------------------------------------------------------------------===//

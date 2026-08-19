@@ -21,7 +21,8 @@ Two ways to run the same program:
 
 * **Now** — compile and execute in one process, the usual way to develop.
 * **Later** — write a `.hxb` file and run it with `hexir-run`, a small program
-  that contains no compiler at all.
+  that contains no compiler at all. A GPU kernel is compiled to a CUBIN and
+  embedded, so the runtime launches it with no compiler present.
 
 ## Start here
 
@@ -63,8 +64,8 @@ cuda-server
 Hexir is research software. Some parts are finished and some are scaffolding,
 and the docs say which is which rather than leaving you to find out.
 
-| Works | Partly works | Not built yet |
+| Works | Partly | Not yet |
 | --- | --- | --- |
-| CPU path, end to end | GPU path (needs a CUDA toolkit) | Real kernels inside `.hxb` |
-| Placement per operation | The `.hxb` file format | Memory transfers between devices |
-| Running `.hxb` files | | The CUDA half of the runtime |
+| CPU path, end to end | GPU kernels are one block, one thread | Transfer insertion in the JIT path |
+| Per-operation placement | CPU kernels in `.hxb` are descriptions, not code | Memory planning |
+| `.hxb` artifacts, CPU **and GPU** | | More operations, and a frontend |
