@@ -40,7 +40,7 @@ struct PipelineOptions {
 
   /// NVPTX target for the CUDA path. sm_86 is the A6000; use sm_80 for A100,
   /// sm_89 for L4/4090, sm_75 for a 1660 Ti.
-  std::string gpuChip = "sm_86";
+  std::string gpuChip = "sm_75";
   std::string gpuFeatures = "+ptx80";
   int gpuOptLevel = 3;
 };

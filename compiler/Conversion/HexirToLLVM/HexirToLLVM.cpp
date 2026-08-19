@@ -39,6 +39,7 @@
 #include "mlir/Conversion/FuncToLLVM/ConvertFuncToLLVM.h"
 #include "mlir/Conversion/FuncToLLVM/ConvertFuncToLLVMPass.h"
 #include "mlir/Conversion/LLVMCommon/ConversionTarget.h"
+#include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Conversion/LLVMCommon/TypeConverter.h"
 #include "mlir/Conversion/MemRefToLLVM/MemRefToLLVM.h"
 #include "mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"
@@ -197,6 +198,11 @@ void HexirToLLVMLoweringPass::runOnOperation() {
   // the LLVM dialect.
   LLVMConversionTarget target(getContext());
   target.addLegalOp<ModuleOp>();
+  // Leave the GPU dialect alone. On the CUDA path this pass runs before
+  // gpu-to-llvm (the order MLIR's own gpu-lower-to-nvvm-pipeline uses), so
+  // gpu.launch_func and the gpu.module still have to be here when it finishes;
+  // gpu-to-llvm rewrites them afterwards.
+  target.addLegalDialect<gpu::GPUDialect>();
 
   // During this lowering, we will also be lowering the MemRef types, that are
   // currently being operated on, to a representation in LLVM. To perform this

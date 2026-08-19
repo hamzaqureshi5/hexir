@@ -129,15 +129,27 @@ void mlir::hexir::buildHexirPipeline(PassManager &pm,
   // linalg ops.
   pm.addPass(createConvertLinalgToLoopsPass());
 
-  if (loweringCudaToGpu) {
-    // gpu.launch (inline body)
-    //   -> gpu-kernel-outlining -> gpu.module + gpu.launch_func
-    //   -> nvvm-attach-target   -> attaches the NVPTX target
-    //   -> convert-gpu-to-nvvm  -> NVVM dialect inside gpu.module
-    //   -> gpu-module-to-binary -> NVVM -> PTX -> CUBIN (needs ptxas)
-    //   -> gpu-to-llvm          -> host: launch_func -> CUDA runtime calls
+  // Outline the kernel first, then lower structured control flow across the
+  // whole module so the kernel body -- which CudaToGpu builds out of scf.for --
+  // is flat before anything tries to translate it to LLVM IR.
+  if (loweringCudaToGpu)
     pm.addPass(createGpuKernelOutliningPass());
 
+  // SCF -> CFG, module-wide: host and kernel both need it.
+  pm.addPass(createSCFToControlFlowPass());
+
+  if (loweringCudaToGpu) {
+    // Order matches MLIR's own gpu-lower-to-nvvm-pipeline, and it is not
+    // interchangeable:
+    //
+    //   nvvm-attach-target   attach the NVPTX target to the gpu.module
+    //   convert-gpu-to-nvvm  gpu/arith/func -> NVVM, inside the gpu.module
+    //   gpu-to-llvm          host side: launch_func -> CUDA runtime calls
+    //   gpu-module-to-binary NVVM -> PTX -> CUBIN, needs ptxas
+    //
+    // gpu-to-llvm must come BEFORE gpu-module-to-binary. Run the other way
+    // round and the binary is already embedded when the host conversion runs,
+    // which fails with "failed to legalize operation 'gpu.launch_func'".
     GpuNVVMAttachTargetOptions nvvmOpts;
     nvvmOpts.chip = opts.gpuChip;
     nvvmOpts.features = opts.gpuFeatures;
@@ -147,20 +159,28 @@ void mlir::hexir::buildHexirPipeline(PassManager &pm,
     {
       OpPassManager &gpuPM = pm.nest<gpu::GPUModuleOp>();
       gpuPM.addPass(createConvertGpuOpsToNVVMOps());
+      // A partial conversion, so it leaves unrealized_conversion_casts behind.
+      // The reconcile pass at the end of the pipeline only sees the host
+      // module, so the kernel needs its own or gpu-module-to-binary fails to
+      // translate it.
+      gpuPM.addPass(createReconcileUnrealizedCastsPass());
     }
 
-    pm.addPass(createGpuModuleToBinaryPass());
+    // Host side to LLVM first, then the GPU handoff -- again matching
+    // gpu-lower-to-nvvm-pipeline, which converts func/arith/memref before
+    // gpu-to-llvm. Leave gpu.launch_func standing for the next pass.
+    pm.addPass(mlir::hexir::createLowerToLLVMPass());
     pm.addPass(createGpuToLLVMConversionPass());
+    pm.addPass(createGpuModuleToBinaryPass());
   }
-
-  // SCF -> CFG
-  pm.addPass(createSCFToControlFlowPass());
 
   //===--------------------------------------------------------------------===//
   // LLVM dialect
   //===--------------------------------------------------------------------===//
   if (loweringToLLVM) {
-    pm.addPass(mlir::hexir::createLowerToLLVMPass());
+    // Already run above on the CUDA path, before the GPU handoff.
+    if (!loweringCudaToGpu)
+      pm.addPass(mlir::hexir::createLowerToLLVMPass());
     // Clean up unrealized casts left by the partial conversions above.
     pm.addPass(createReconcileUnrealizedCastsPass());
     pm.addPass(LLVM::createDIScopeForLLVMFuncOpPass());

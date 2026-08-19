@@ -148,6 +148,14 @@ static cl::opt<Stage> emitAction(
 
 static cl::opt<bool> enableOpt("opt", cl::desc("Enable optimizations"));
 
+static cl::opt<std::string> gpuChip(
+    "gpu-chip",
+    cl::desc("NVPTX target architecture for CUDA-placed ops (default sm_75). "
+             "sm_75 GTX 16xx/RTX 20xx, sm_80 A100, sm_86 A6000/RTX 30xx, "
+             "sm_89 L4/RTX 40xx. A mismatch fails at launch with "
+             "CUDA_ERROR_NO_BINARY_FOR_GPU, not at compile time."),
+    cl::value_desc("sm_XX"), cl::init("sm_75"));
+
 static cl::opt<std::string>
     outputFilename("o", cl::desc("Output file for -emit=hxb"),
                    cl::value_desc("filename"), cl::init("out.hxb"));
@@ -185,6 +193,16 @@ static int loadMLIR(mlir::MLIRContext &context,
                     mlir::OwningOpRef<mlir::ModuleOp> &module) {
 
   context.getOrLoadDialect<mlir::func::FuncDialect>();
+  // Register the MLIR -> LLVM IR translations BEFORE any pass runs.
+  // gpu-module-to-binary serializes a gpu.module during the pipeline, and it
+  // needs these; registering them inside runJit/dumpLLVMIR was too late and
+  // failed with "missing LLVMTranslationDialectInterface ... for op:
+  // gpu.module" no matter what the CUDA install looked like.
+  mlir::registerBuiltinDialectTranslation(context);
+  mlir::registerGPUDialectTranslation(context);
+  mlir::registerLLVMDialectTranslation(context);
+  mlir::registerNVVMDialectTranslation(context);
+
   context.getOrLoadDialect<mlir::hexir::HexirDialect>();
 
   // If an input file was given, compile that. Otherwise fall back to the
@@ -230,6 +248,7 @@ static int loadAndProcessMLIR(mlir::MLIRContext &context,
   mlir::hexir::PipelineOptions opts;
   opts.stage = emitAction;
   opts.enableOpt = enableOpt;
+  opts.gpuChip = gpuChip;
   mlir::hexir::buildHexirPipeline(pm, opts);
 
   if (mlir::failed(pm.run(*module)))
@@ -252,11 +271,6 @@ static int dumpAST() {
 }
 
 static int dumpLLVMIR(mlir::ModuleOp module) {
-  // Register the translation to LLVM IR with the MLIR context.
-  mlir::registerBuiltinDialectTranslation(*module->getContext());
-  mlir::registerGPUDialectTranslation(*module->getContext());
-  mlir::registerLLVMDialectTranslation(*module->getContext());
-  mlir::registerNVVMDialectTranslation(*module->getContext());
 
   // Convert the module to LLVM IR in a new LLVM IR context.
   llvm::LLVMContext llvmContext;
@@ -302,12 +316,6 @@ static int runJit(mlir::ModuleOp module) {
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmPrinter();
 
-  // Register the translation from MLIR to LLVM IR, which must happen before we
-  // can JIT-compile.
-  mlir::registerBuiltinDialectTranslation(*module->getContext());
-  mlir::registerGPUDialectTranslation(*module->getContext());
-  mlir::registerLLVMDialectTranslation(*module->getContext());
-  mlir::registerNVVMDialectTranslation(*module->getContext());
 
   // An optimization pipeline to use within the execution engine.
   auto optPipeline = mlir::makeOptimizingTransformer(
@@ -391,6 +399,11 @@ int main(int argc, char **argv) {
   mlir::NVVM::registerNVVMTargetInterfaceExternalModels(registry);
   mlir::NVVM::registerConvertGpuToNVVMInterface(registry);
   mlir::LLVM::registerInlinerInterface(registry);
+  // Teaches #gpu.select_object how to translate itself to LLVM IR. This is a
+  // separate registration from registerGPUDialectTranslation, and without it
+  // translating a gpu.binary trips an assertion inside MLIR:
+  //   Assertion `offloadingHandler && "Invalid offloading handler."' failed.
+  mlir::gpu::registerOffloadingLLVMTranslationInterfaceExternalModels(registry);
 
   MLIRContext context(registry);
 
