@@ -32,6 +32,10 @@ std::unique_ptr<mlir::Pass> createLowerToLLVMPass();
 // Create pass hexir-to-linalg
 std::unique_ptr<mlir::Pass> createLowerToLinalgPass();
 
+// Lower hexir compute ops to hextir prim funcs called via hexir.call_tir.
+// Reads the `device` attr set by the partition pass to pick loop kinds.
+std::unique_ptr<mlir::Pass> createLowerToTIRPass();
+
 // Annotate supported ops with their selected CPU/CUDA device.
 std::unique_ptr<mlir::Pass> createPartitionPass();
 

@@ -62,6 +62,7 @@ Tests that need the CUDA toolkit are gated `REQUIRES: cuda` (lit enables that fe
 
 ```bash
 ./build/hexir -emit=mlir            # hexir dialect (initial module)
+./build/hexir -emit=mlir-tir        # after LowerToTIR (hextir prim funcs + call_tir)
 ./build/hexir -emit=mlir-linalg     # after LowerToLinalg
 ./build/hexir -emit=mlir-hetero     # after Partition + MaterializeLSTargets (ls_cpu/ls_gpu ops)
 ./build/hexir -emit=mlir-gpu        # cuda partitions as gpu.launch
@@ -92,6 +93,12 @@ Pass order and the files implementing each:
 
 1. `canonicalize` → `hexir-shape-inference` (`ShapeInferencePass.cpp`, via the
    `ShapeInferenceOpInterface`) → `canonicalize` → `cse`, nested on `hexir::FuncOp`
+1b. `-emit=mlir-tir` branches off here: `hexir-partition` → `hexir-lower-to-tir`
+   (`LowerToTIR.cpp`), then stops. Each `hexir.linear`/`add`/`relu` becomes a
+   `hextir.prim_func` at module scope plus a `hexir.call_tir`. The `device` attr picks the loop
+   kinds — `cpu` → `parallel`, `cuda` → `thread_binding` bound to `blockIdx.x`/`threadIdx.x`;
+   reduction axes stay `serial`. `DumpMLIRTIR` sits below `DumpMLIRLinalg` in the `Action` enum
+   precisely so `emitAction >= DumpMLIRLinalg` stays false and the linalg pipeline does not run.
 2. `hexir-partition` (`Partition.cpp`) — **runs before lowering**, annotating frontend `hexir.*`
    ops with `device = "cpu"|"cuda"` from the `TargetSupport` registry, and tags the module with
    `hexir.targets`
@@ -134,7 +141,8 @@ Dialects (three of them):
   `return`. Reached only via `hexir.call_tir`, whose verifier enforces the destination-passing
   contract: callee arity must be `args + 1`. Deliberately thin — it records scheduling decisions
   and hands loop nests to `scf`/`memref`/`gpu` rather than reimplementing a scheduling language.
-  **Not yet wired into any pass pipeline**; it parses, verifies and round-trips, and that is all.
+  Produced by `hexir-lower-to-tir` (`-emit=mlir-tir`). Nothing lowers *out* of it yet, so that
+  stage is terminal.
 - `ls_cpu` / `ls_gpu` — `include/Dialects/LSDialects.td` + `src/Dialects/LSDialects.cpp`.
   Mirror-image `add`/`mul`/`matmul`/`relu` ops that exist only to make placement legible in
   `-emit=mlir-hetero`. Adding an op means adding it to *both* dialects plus a pattern in
@@ -171,15 +179,18 @@ rewrites — currently all patterns are commented out; only `ConstantOp::fold` i
 
 - **`src/Jit.cpp` is dead code.** It defines a global `runJit`, but `main.cpp` defines and calls
   its own `static runJit`. Edits to `Jit.cpp` have no effect on the binary.
-- **5 of 10 checked-in tests fail, for two reasons unrelated to the compiler.**
+- **5 of 11 checked-in tests fail, for two reasons unrelated to the compiler.**
   `TargetInfo.cpp` sets `opPreferred_["hexir.linear"] = "cpu"` (with a comment claiming GPU), and
   the relu call in `createMLPLinearFunction` is commented out — so `-emit=mlir-hetero` emits
   `ls_cpu.matmul` and no relu, while `partition-hetero.mlir`, `placement-flag.mlir`
   (DEFAULT/SWAP/ALLGPU), `hexir-dialect.mlir`, `lower-to-linalg.mlir`, and `cuda-to-gpu.mlir`
   expect `ls_gpu.matmul` and a relu. Restoring the relu fixes the first two; flipping the default
   to `cuda` fixes the rest but makes plain `-emit=jit` require a CUDA toolkit.
-  `jit-cpu.mlir` and `hextir-roundtrip.mlir` pass; the other 3 are `REQUIRES: cuda` and report as
-  unsupported.
+  `jit-cpu.mlir`, `hextir-roundtrip.mlir` and `lower-to-tir.mlir` pass; the other 3 are
+  `REQUIRES: cuda` and report as unsupported.
+- **Do not write a FileCheck prefix followed by a colon in test prose.** A comment like
+  `// Everything on the CPU: ...` in a test using `--check-prefix=CPU` is parsed as a directive
+  and fails with a confusing "expected string not found in input".
 - `FileCheck` is not on PATH on this machine; it lives in the LLVM build tree
   (`/home/user/llvm-project/build/bin`), which `test/lit.cfg.py` does not search. Prepend it to
   PATH to run the suite. `lit` is importable as a Python module but has no console script, so

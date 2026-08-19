@@ -121,6 +121,11 @@ enum Action {
   None,
   DumpAST,
   DumpMLIR,
+  // Kernel level. Sits below DumpMLIR and above the linalg stages so that
+  // `emitAction >= DumpMLIRLinalg` stays false here: -emit=mlir-tir is a
+  // branch off the pipeline, not a step along it. Nothing lowers hextir
+  // further yet.
+  DumpMLIRTIR,
   DumpMLIRAffine,
   DumpMLIRLinalg,
   DumpMLIRHetero,
@@ -133,6 +138,9 @@ enum Action {
 static cl::opt<enum Action> emitAction(
     "emit", cl::desc("Select the kind of output desired"),
     cl::values(clEnumValN(DumpMLIR, "mlir", "output the MLIR dump")),
+    cl::values(clEnumValN(DumpMLIRTIR, "mlir-tir",
+                          "output the MLIR dump after lowering hexir compute "
+                          "ops to hextir prim funcs")),
     cl::values(clEnumValN(DumpMLIRAffine, "mlir-affine",
                           "output the MLIR dump after affine lowering")),
     cl::values(clEnumValN(DumpMLIRLinalg, "mlir-linalg",
@@ -244,6 +252,17 @@ static int loadAndProcessMLIR(mlir::MLIRContext &context,
     optPM.addPass(mlir::hexir::createShapeInferencePass());
     optPM.addPass(mlir::createCanonicalizerPass());
     optPM.addPass(mlir::createCSEPass());
+  }
+
+  // Kernel level: partition first so every compute op carries a `device`, then
+  // turn each one into a hextir.prim_func. Terminal stage -- nothing lowers
+  // hextir further yet, so it does not fall through to the linalg pipeline.
+  if (emitAction == Action::DumpMLIRTIR) {
+    pm.addPass(mlir::hexir::createPartitionPass());
+    pm.addPass(mlir::hexir::createLowerToTIRPass());
+    if (mlir::failed(pm.run(*module)))
+      return 4;
+    return 0;
   }
 
   if (isLoweringToLinalg) {
