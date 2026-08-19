@@ -11,5 +11,6 @@
 #include "hexir_runtime/hal.h"
 #include "hexir_runtime/module.h"
 #include "hexir_runtime/status.h"
+#include "hexir_runtime/vm.h"
 
 #endif // HEXIR_RUNTIME_RUNTIME_H

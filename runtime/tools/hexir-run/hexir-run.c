@@ -3,10 +3,9 @@
 // The deploy-side entry point: takes a module the compiler produced and runs
 // it, with no compiler in the process.
 //
-// Executing a module needs a PROGRAM section the compiler does not emit yet
-// (there is no -emit=hxb), so for now this loads and validates a module,
-// reports what is in it, and smoke-tests the HAL. Wiring up execution is a
-// matter of walking the command list once that section exists.
+// Loads a module produced by `hexir -emit=hxb`, reports what is in it, then
+// replays its command list against the HAL. --selftest exercises the HAL
+// without needing a module.
 //
 //===----------------------------------------------------------------------===//
 
@@ -17,7 +16,7 @@
 
 static int usage(void) {
   fprintf(stderr,
-          "usage: hexir-run <module.hxb> [--device=cpu|cuda]\n"
+          "usage: hexir-run <module.hxb> [--device=cpu|cuda] [--entry=name]\n"
           "       hexir-run --selftest\n");
   return 2;
 }
@@ -65,12 +64,15 @@ static int selftest(hexir_device_kind_t kind) {
 
 int main(int argc, char **argv) {
   const char *path = NULL;
+  const char *entry = "main";
   hexir_device_kind_t kind = HEXIR_DEVICE_CPU;
   int want_selftest = 0;
 
   for (int i = 1; i < argc; ++i) {
     if (strcmp(argv[i], "--selftest") == 0) {
       want_selftest = 1;
+    } else if (strncmp(argv[i], "--entry=", 8) == 0) {
+      entry = argv[i] + 8;
     } else if (strncmp(argv[i], "--device=", 9) == 0) {
       const char *name = argv[i] + 9;
       if (strcmp(name, "cpu") == 0) {
@@ -111,20 +113,23 @@ int main(int argc, char **argv) {
            (unsigned long long)s->offset, (unsigned long long)s->size);
   }
 
-  const void *program = NULL;
-  uint64_t program_size = 0;
-  if (hexir_module_section(module, HEXIR_SECTION_PROGRAM, &program,
-                           &program_size) != HEXIR_OK) {
-    fprintf(stderr,
-            "hexir-run: module has no program section, nothing to run\n");
+  hexir_device_t *device = NULL;
+  status = hexir_device_create(kind, &device);
+  if (status != HEXIR_OK) {
+    fprintf(stderr, "hexir-run: device create failed: %s\n",
+            hexir_status_string(status));
     hexir_module_release(module);
     return 1;
   }
+  printf("device        : %s\n", hexir_device_name(device));
+  printf("--\n");
 
-  fprintf(stderr,
-          "hexir-run: program section found (%llu bytes) but the command list "
-          "interpreter is not implemented yet\n",
-          (unsigned long long)program_size);
+  status = hexir_execute(module, device, entry);
+  if (status != HEXIR_OK)
+    fprintf(stderr, "hexir-run: %s failed: %s\n", entry,
+            hexir_status_string(status));
+
+  hexir_device_release(device);
   hexir_module_release(module);
-  return (int)HEXIR_ERROR_UNIMPLEMENTED;
+  return status == HEXIR_OK ? 0 : 1;
 }

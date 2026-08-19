@@ -43,7 +43,9 @@ void mlir::hexir::buildHexirPipeline(PassManager &pm,
   //===--------------------------------------------------------------------===//
   // Graph-level cleanup
   //===--------------------------------------------------------------------===//
-  if (opts.enableOpt || loweringToLinalg || stage == Stage::TIR) {
+  const bool kernelLevel = stage == Stage::TIR || stage == Stage::HXB;
+
+  if (opts.enableOpt || loweringToLinalg || kernelLevel) {
     // Nested on hexir::FuncOp, which only exists if hexir.func ops were built.
     OpPassManager &optPM = pm.nest<mlir::hexir::FuncOp>();
     optPM.addPass(createCanonicalizerPass());
@@ -58,7 +60,8 @@ void mlir::hexir::buildHexirPipeline(PassManager &pm,
   // Partition first so every compute op carries a `device`, then turn each one
   // into a hextir.prim_func. Terminal: nothing lowers hextir further yet, so
   // this does not fall through to the linalg pipeline below.
-  if (stage == Stage::TIR) {
+  // -emit=hxb serializes from exactly this level, so it shares the pipeline.
+  if (kernelLevel) {
     pm.addPass(mlir::hexir::createPartitionPass());
     pm.addPass(mlir::hexir::createLowerToTIRPass());
     return;

@@ -16,7 +16,9 @@ add_library(hexir_runtime STATIC
   src/status.c
   src/hal/hal.c
   src/hal/cpu/cpu_device.c
-  src/module/module.c)
+  src/module/module.c
+  src/vm/interpreter.c
+  src/kernels/reference_kernels.c)
 
 target_include_directories(hexir_runtime
   PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/include

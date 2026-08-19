@@ -6,6 +6,7 @@
 #include "hexir/Dialect/LS/IR/LSDialects.h"
 #include "hexir/Conversion/Passes.h"
 #include "hexir/Pipelines/Pipelines.h"
+#include "hexir/Serialization/ModuleSerializer.h"
 #include "hexir/Dialect/Hexir/Transforms/Passes.h"
 #include "hexir/Dialect/LS/Transforms/Passes.h"
 #include "hexir/Target/TargetInfo.h"
@@ -129,6 +130,9 @@ static cl::opt<Stage> emitAction(
     cl::values(clEnumValN(Stage::TIR, "mlir-tir",
                           "output the MLIR dump after lowering hexir compute "
                           "ops to hextir prim funcs")),
+    cl::values(clEnumValN(Stage::HXB, "hxb",
+                          "serialize a loadable module for the runtime "
+                          "(see -o)")),
     cl::values(clEnumValN(Stage::Affine, "mlir-affine",
                           "output the MLIR dump after affine lowering")),
     cl::values(clEnumValN(Stage::Linalg, "mlir-linalg",
@@ -145,6 +149,10 @@ static cl::opt<Stage> emitAction(
                    "JIT the code and run it by invoking the main function")));
 
 static cl::opt<bool> enableOpt("opt", cl::desc("Enable optimizations"));
+
+static cl::opt<std::string>
+    outputFilename("o", cl::desc("Output file for -emit=hxb"),
+                   cl::value_desc("filename"), cl::init("out.hxb"));
 
 // Override op placement at runtime without recompiling, e.g.:
 //   ./hexir -emit=jit -placement=linalg.matmul=cpu
@@ -418,6 +426,21 @@ int main(int argc, char **argv) {
   mlir::OwningOpRef<mlir::ModuleOp> module;
   if (int error = loadAndProcessMLIR(context, module))
     return error;
+
+  // Serialize a loadable module for the runtime.
+  if (emitAction == Stage::HXB) {
+    std::error_code ec;
+    llvm::raw_fd_ostream os(outputFilename, ec, llvm::sys::fs::OF_None);
+    if (ec) {
+      llvm::errs() << "error: cannot open '" << outputFilename
+                   << "': " << ec.message() << "\n";
+      return 1;
+    }
+    if (mlir::failed(mlir::hexir::serializeToHXB(*module, os)))
+      return 1;
+    llvm::errs() << "wrote " << outputFilename << "\n";
+    return 0;
+  }
 
   // If we aren't exporting to non-mlir, then we are done.
   bool isOutputingMLIR = mlir::hexir::stageEmitsMLIR(emitAction);

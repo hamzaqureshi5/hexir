@@ -239,6 +239,13 @@ struct LowerToTIRPass
         builder, loc, name,
         builder.getFunctionType(bufferTypes, /*results=*/{}));
     fn->setAttr("device", builder.getStringAttr(device));
+    // What this kernel computes, for consumers that need to know without
+    // matching on the body -- notably the .hxb serializer, which turns this
+    // into an executable descriptor.
+    StringRef kernel = isa<mlir::hexir::LinearOp>(op)  ? "matmul"
+                       : isa<mlir::hexir::AddOp>(op)   ? "add"
+                                                       : "relu";
+    fn->setAttr("hexir.kernel", builder.getStringAttr(kernel));
 
     unsigned numInputs = op->getNumOperands();
     if (isa<hexir::LinearOp>(op)) {

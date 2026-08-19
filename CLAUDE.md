@@ -32,11 +32,13 @@ include/hexir/
   Dialect/{Hexir,LS}/Transforms/        Passes.h for same-dialect rewrites
   Conversion/Passes.h                   every dialect-to-dialect pass
   Pipelines/Pipelines.h                 the pass pipeline, and the Stage enum
+  Serialization/ModuleSerializer.h      emit a loadable module
   Target/, Support/
 lib/
   Dialect/<Name>/{IR,Transforms}/       mirrors include/
   Conversion/<A>To<B>/                  one directory per conversion
   Pipelines/                            pass ordering
+  Serialization/                        .hxb writer (includes runtime headers)
   Target/, Support/
 tools/hexir/hexir.cpp                   CLI, LLVM translation, JIT
 runtime/                                standalone C runtime (no MLIR/LLVM)
@@ -73,11 +75,26 @@ The container is a header, a section table, then 8-byte-aligned payloads
 in place from the mapping, so a large RODATA costs nothing to load. Offsets come off disk and are
 bounds-checked before any pointer is handed out.
 
-**What is stubbed:** the compiler has no `-emit=hxb`, so nothing produces a module yet, and
-`hexir-run` has no command-list interpreter — it loads, validates, reports sections, and exits
-`HEXIR_ERROR_UNIMPLEMENTED` if asked to run. `--selftest` exercises the HAL without a module. The
-CUDA backend returns `HEXIR_ERROR_UNIMPLEMENTED`; it belongs in `src/hal/cuda/` and should use the
-driver API (`libcuda`) rather than the CUDA runtime API so it can be dlopened.
+`runtime/include/hexir_runtime/program.h` defines the PROGRAM/EXECUTABLES encoding and is the
+**contract between the two halves**. It lives on the runtime side deliberately: the compiler emits
+the format the runtime defines, and `lib/Serialization` includes it. Headers only — nothing links
+back, and the dependency must never point the other way.
+
+The host program is a flat command list (`ALLOC`/`CONST`/`DISPATCH`/`PRINT`/`END`), not bytecode:
+everything the compiler can currently produce is straight-line dataflow, so an interpreter with
+branches would be unused machinery. Bytecode becomes necessary with dynamic shapes or control
+flow. Buffers are referred to by slot, a dense index space `ModuleSerializer` assigns.
+
+**What is stubbed, and it matters:** the EXECUTABLES section carries kernel *descriptors*
+(kind + extents + placement), not machine code. The runtime supplies the bodies from
+`src/kernels/reference_kernels.c`. That was the way to make the container, loader, HAL and command
+list real and testable end to end; embedding a CUBIN from `gpu.binary`, or a host object, replaces
+the descriptors without changing the container or the command list. Until then a module is
+portable but not actually carrying compiled code. The CUDA HAL backend also returns
+`HEXIR_ERROR_UNIMPLEMENTED`; it belongs in `src/hal/cuda/` using the driver API (`libcuda`) rather
+than the CUDA runtime API, so it can be dlopened.
+
+`hexir-run --selftest` exercises the HAL without needing a module.
 
 `targets/` is **not** part of the build and references a nonexistent `ppytorch_core` — inert
 scaffolding. Per the architecture discussion those directories are the natural home for runtime
@@ -113,6 +130,8 @@ Tests that need the CUDA toolkit are gated `REQUIRES: cuda` (lit enables that fe
 ```bash
 ./build/hexir -emit=mlir            # hexir dialect (initial module)
 ./build/hexir -emit=mlir-tir        # after LowerToTIR (hextir prim funcs + call_tir)
+./build/hexir -emit=hxb -o m.hxb    # loadable module for the runtime
+./build/hexir-run m.hxb             # run it, with no MLIR/LLVM in the process
 ./build/hexir -emit=mlir-linalg     # after LowerToLinalg
 ./build/hexir -emit=mlir-hetero     # after Partition + MaterializeLSTargets (ls_cpu/ls_gpu ops)
 ./build/hexir -emit=mlir-gpu        # cuda partitions as gpu.launch
@@ -229,18 +248,26 @@ rewrites — currently all patterns are commented out; only `ConstantOp::fold` i
 
 ## Gotchas
 
-- **5 of 11 checked-in tests fail, for two reasons unrelated to the compiler.**
+- **5 of 12 checked-in tests fail, for two reasons unrelated to the compiler.**
   `TargetInfo.cpp` sets `opPreferred_["hexir.linear"] = "cpu"` (with a comment claiming GPU), and
   the relu call in `createMLPLinearFunction` is commented out — so `-emit=mlir-hetero` emits
   `ls_cpu.matmul` and no relu, while `partition-hetero.mlir`, `placement-flag.mlir`
   (DEFAULT/SWAP/ALLGPU), `hexir-dialect.mlir`, `lower-to-linalg.mlir`, and `cuda-to-gpu.mlir`
   expect `ls_gpu.matmul` and a relu. Restoring the relu fixes the first two; flipping the default
   to `cuda` fixes the rest but makes plain `-emit=jit` require a CUDA toolkit.
-  `jit-cpu.mlir`, `hextir-roundtrip.mlir` and `lower-to-tir.mlir` pass; the other 3 are
-  `REQUIRES: cuda` and report as unsupported.
+  `jit-cpu.mlir`, `hextir-roundtrip.mlir`, `lower-to-tir.mlir` and `hxb-roundtrip.mlir` pass; the
+  other 3 are `REQUIRES: cuda` and report as unsupported.
+- **`LSToLinalg` has no pattern for `ls_cpu.add`/`ls_gpu.add`.** `MaterializeLSTargets` creates
+  them from `linalg.add`, and nothing converts them back, so any program containing `hexir.add`
+  fails at `-emit=mlir-gpu` and beyond with "failed to legalize operation 'ls_cpu.add'". Pre-existing;
+  the `-emit=hxb` path does not go through the mirror dialects and handles `add` fine. This is the
+  maintenance cost of mirroring every op into two dialects plus two patterns.
 - **Do not write a FileCheck prefix followed by a colon in test prose.** A comment like
   `// Everything on the CPU: ...` in a test using `--check-prefix=CPU` is parsed as a directive
   and fails with a confusing "expected string not found in input".
+- Tests asserting a non-zero exit need `not` in front of the command, or lit fails the RUN line
+  itself. `%hexir-run` is registered in `lit.cfg.py` *before* `%hexir`, since lit applies
+  substitutions in list order and the shorter pattern would otherwise eat the longer one.
 - `FileCheck` is not on PATH on this machine; it lives in the LLVM build tree
   (`/home/user/llvm-project/build/bin`), which `test/lit.cfg.py` does not search. Prepend it to
   PATH to run the suite. `lit` is importable as a Python module but has no console script, so

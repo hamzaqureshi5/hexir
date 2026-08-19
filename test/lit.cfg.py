@@ -57,6 +57,13 @@ filecheck = find_tool(
 if not filecheck:
     lit_config.fatal("FileCheck not found in PATH or /usr/lib/llvm-*/bin")
 
+# %hexir-run must be registered BEFORE %hexir: lit applies substitutions in
+# order, so the shorter pattern would otherwise eat the prefix of the longer.
+hexir_run = os.path.join(build_dir, "hexir-run")
+if os.path.exists(hexir_run):
+    config.substitutions.append(("%hexir-run", hexir_run))
+    config.available_features.add("runtime")
+
 config.substitutions.append(("%hexir", hexir))
 config.substitutions.append(("FileCheck", filecheck))
 
