@@ -121,30 +121,32 @@ Without that check a module built for the GPU would run quietly on the CPU and
 print the right numbers, which is exactly the illusion this project exists to
 avoid.
 
-:::{important}
-**The `executables` section holds kernel descriptions, not machine code.**
+:::{note}
+**A cuda kernel is real device code; a cpu kernel is still a description.**
 
-Each entry says *what* to compute — matrix multiply, these extents, this device
-— and the runtime supplies the body from `reference_kernels.c`. That was the
-way to make the file format, the loader, the HAL and the command list real and
-testable end to end.
-
-So a `.hxb` file today is portable, and its numbers are correct and match the
-JIT exactly, but it is **not yet carrying compiled code**. Putting a CUBIN from
-`gpu.binary` in that section, or a host object file, replaces the descriptions
-without changing the file format or the command list.
-
-This is what now stops a GPU run. Given a cuda module and a cuda device the
-runtime allocates on the device and transfers the constants, then stops:
+For a kernel placed on cuda, `-emit=hxb` lowers it `hextir` → `gpu` → NVVM →
+CUBIN and embeds the image. The module is then self-contained, and running it
+needs a GPU and no compiler:
 
 ```
-hexir-run: kernel 'linear_0' is placed on cuda, but the module carries a kernel
-descriptor rather than device code, and there is nothing to launch
+$ hexir -emit=hxb -o gpu.hxb -placement=hexir.linear=cuda
+$ hexir-run --device=cuda gpu.hxb
+device        : cuda (NVIDIA GeForce GTX 1660 Ti)
+--
+8.000000 17.000000
+12.000000 14.000000
 ```
 
-The compiler can already produce the missing piece — `-emit=mlir-llvm` with a
-cuda placement emits a `gpu.binary` holding a CUBIN that `ptxas` compiled. It
-is not yet routed into the artifact.
+Identical to the CPU answer, which is the point: same program, same result,
+different device, no compiler in the process.
+
+Kernels are built with **bare-pointer calling convention**, so each argument is
+one device address rather than MLIR's seven-scalar memref descriptor. That is
+what keeps `cuLaunchKernel` in the runtime simple.
+
+A cpu kernel still carries only a descriptor — kind, extents, placement — and
+the runtime supplies the body from `reference_kernels.c`. Embedding a host
+object would close that gap the same way, without changing the container.
 :::
 
 ## Commands

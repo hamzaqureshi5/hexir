@@ -69,6 +69,7 @@ static const hexir_device_vtable_t kCpuVtable = {
     cpu_buffer_write,
     cpu_buffer_read,
     cpu_buffer_host_pointer,
+    NULL, /* no device images; the host runs reference kernels */
     cpu_wait,
     cpu_release,
 };

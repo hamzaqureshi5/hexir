@@ -20,10 +20,19 @@
 #include "hexir_runtime/module.h"
 #include "hexir_runtime/program.h"
 
+#include "hexir/Conversion/Passes.h"
+
+#include "mlir/Conversion/GPUToNVVM/GPUToNVVMPass.h"
+#include "mlir/Conversion/ReconcileUnrealizedCasts/ReconcileUnrealizedCasts.h"
+#include "mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/GPU/IR/GPUDialect.h"
+#include "mlir/Dialect/GPU/Transforms/Passes.h"
+#include "mlir/Pass/PassManager.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 
@@ -69,13 +78,15 @@ uint32_t kernelKindFromAttr(llvm::StringRef kernel) {
 
 struct Serializer {
   ModuleOp module;
+  std::string gpuChip;
 
-  ByteBuffer rodata, program, executables, symbols;
+  ByteBuffer rodata, program, executables, images, symbols;
   llvm::DenseMap<Value, uint64_t> slotOf;
   llvm::DenseMap<llvm::StringRef, uint32_t> executableIndex;
   uint64_t nextSlot = 0;
 
-  explicit Serializer(ModuleOp module) : module(module) {}
+  Serializer(ModuleOp module, StringRef gpuChip)
+      : module(module), gpuChip(gpuChip.str()) {}
 
   uint64_t assignSlot(Value v) {
     uint64_t slot = nextSlot++;
@@ -98,15 +109,107 @@ struct Serializer {
     return elems * (type.getElementTypeBitWidth() / 8);
   }
 
+  /// Compile every cuda-placed kernel to a device image.
+  ///
+  /// Done on a clone: the module being serialized has to stay at the kernel
+  /// level, because that is what the command list is built from. The clone is
+  /// lowered hextir -> gpu -> NVVM -> CUBIN and only the blobs come back.
+  ///
+  /// Bare-pointer calling convention on purpose: without it every memref
+  /// argument expands into seven scalars and the runtime would have to build
+  /// MLIR's descriptor layout by hand. With it a kernel argument is one device
+  /// pointer.
+  llvm::StringMap<std::string> compileDeviceImages(
+      llvm::StringMap<std::pair<uint32_t, uint32_t>> &geometry) {
+    llvm::StringMap<std::string> blobs;
+
+    bool anyCuda = false;
+    for (auto fn : module.getOps<hextir::PrimFuncOp>())
+      if (auto device = fn->getAttrOfType<StringAttr>("device"))
+        anyCuda |= device.getValue() == "cuda";
+    if (!anyCuda)
+      return blobs;
+
+    OwningOpRef<ModuleOp> clone(module.clone());
+
+    // Two runs on purpose. gpu-module-to-binary erases the gpu.module it
+    // compiles, so the launch geometry has to be read off it in between.
+    {
+      PassManager pm(module.getContext());
+      pm.addPass(mlir::hexir::createHexTIRToGPUPass());
+      // The kernel still has scf.for for any unbound axis (the reduction of a
+      // matmul), and it has to be flat before it can become LLVM IR.
+      pm.addPass(createSCFToControlFlowPass());
+      if (failed(pm.run(*clone))) {
+        module.emitWarning("could not lower cuda kernels to the gpu dialect; "
+                           "the module will carry descriptors only");
+        return blobs;
+      }
+    }
+
+    clone->walk([&](gpu::GPUModuleOp gpuModule) {
+      auto grid = gpuModule->getAttrOfType<IntegerAttr>("hexir.grid_x");
+      auto block = gpuModule->getAttrOfType<IntegerAttr>("hexir.block_x");
+      StringRef name = gpuModule.getName();
+      name.consume_back("_module");
+      geometry[name] = {grid ? static_cast<uint32_t>(grid.getInt()) : 1u,
+                        block ? static_cast<uint32_t>(block.getInt()) : 1u};
+    });
+
+    {
+      PassManager pm(module.getContext());
+      GpuNVVMAttachTargetOptions nvvmOpts;
+      nvvmOpts.chip = gpuChip;
+      nvvmOpts.features = "+ptx80";
+      nvvmOpts.optLevel = 3;
+      pm.addPass(createGpuNVVMAttachTarget(nvvmOpts));
+
+      // Bare-pointer calling convention on purpose: without it every memref
+      // argument expands into seven scalars and the runtime would have to
+      // build MLIR's descriptor layout by hand. With it a kernel argument is
+      // one device pointer.
+      ConvertGpuOpsToNVVMOpsOptions nvvmConv;
+      nvvmConv.useBarePtrCallConv = true;
+      pm.nest<gpu::GPUModuleOp>().addPass(
+          createConvertGpuOpsToNVVMOps(nvvmConv));
+      // A partial conversion: without this the leftover casts make the
+      // translation to LLVM IR fail.
+      pm.nest<gpu::GPUModuleOp>().addPass(createReconcileUnrealizedCastsPass());
+      pm.addPass(createGpuModuleToBinaryPass());
+
+      if (failed(pm.run(*clone))) {
+        module.emitWarning("could not compile cuda kernels to device code; the "
+                           "module will carry descriptors only");
+        return blobs;
+      }
+    }
+
+    clone->walk([&](gpu::BinaryOp binary) {
+      if (binary.getObjects().empty())
+        return;
+      auto object = dyn_cast<gpu::ObjectAttr>(binary.getObjects()[0]);
+      if (!object)
+        return;
+      // gpu.binary is named after the gpu.module, which hextir-to-gpu named
+      // "<kernel>_module".
+      StringRef name = binary.getName();
+      name.consume_back("_module");
+      blobs[name] = object.getObject().getValue().str();
+    });
+    return blobs;
+  }
+
   LogicalResult collectExecutables() {
+    llvm::StringMap<std::pair<uint32_t, uint32_t>> geometry;
+    llvm::StringMap<std::string> blobs = compileDeviceImages(geometry);
+
+    SmallVector<hexir_executable_entry_t> entries;
     for (auto fn : module.getOps<hextir::PrimFuncOp>()) {
       auto kernel = fn->getAttrOfType<StringAttr>("hexir.kernel");
       if (!kernel)
         return fn.emitError("prim func has no hexir.kernel attribute; it was "
                             "not produced by hexir-lower-to-tir");
 
-      // Extents come from the destination buffer, which is the last argument
-      // (a prim func is destination-passing).
       auto argTypes = fn.getArgumentTypes();
       auto dstTy = dyn_cast<MemRefType>(argTypes.back());
       if (!dstTy || dstTy.getRank() != 2)
@@ -120,7 +223,6 @@ struct Serializer {
       entry.device = (device && device.getValue() == "cuda") ? 1u : 0u;
       entry.m = static_cast<uint32_t>(dstTy.getShape()[0]);
       entry.n = static_cast<uint32_t>(dstTy.getShape()[1]);
-      // Reduction extent for matmul: the K of the first operand.
       if (entry.kind == HEXIR_KERNEL_MATMUL) {
         auto lhsTy = cast<MemRefType>(argTypes[0]);
         entry.k = static_cast<uint32_t>(lhsTy.getShape()[1]);
@@ -128,10 +230,39 @@ struct Serializer {
       entry.elem_size =
           static_cast<uint32_t>(dstTy.getElementTypeBitWidth() / 8);
 
+      auto blob = blobs.find(fn.getSymName());
+      if (blob != blobs.end()) {
+        images.padTo(8);
+        entry.image_offset = static_cast<uint32_t>(images.size()); // fixed up
+        entry.image_size = static_cast<uint32_t>(blob->second.size());
+        images.raw(blob->second.data(), blob->second.size());
+        auto dims = geometry.find(fn.getSymName());
+        entry.grid_x = dims != geometry.end() ? dims->second.first : 1u;
+        entry.block_x = dims != geometry.end() ? dims->second.second : 1u;
+      }
+
       executableIndex[fn.getSymName()] =
           static_cast<uint32_t>(executableIndex.size());
+      entries.push_back(entry);
+    }
+
+    // Images sit after the header and the entry table, so offsets are only
+    // final once the table size is known.
+    uint32_t base = static_cast<uint32_t>(sizeof(hexir_executable_header_t) +
+                                          entries.size() * sizeof(entries[0]));
+    base += (8 - (base % 8)) % 8;
+
+    hexir_executable_header_t header;
+    std::memset(&header, 0, sizeof(header));
+    header.count = static_cast<uint32_t>(entries.size());
+    executables.raw(&header, sizeof(header));
+    for (hexir_executable_entry_t &entry : entries) {
+      if (entry.image_size)
+        entry.image_offset += base;
       executables.raw(&entry, sizeof(entry));
     }
+    executables.padTo(8);
+    executables.raw(images.bytes.data(), images.size());
     return success();
   }
 
@@ -266,6 +397,7 @@ struct Serializer {
 } // namespace
 
 LogicalResult mlir::hexir::serializeToHXB(ModuleOp module,
-                                          llvm::raw_ostream &os) {
-  return Serializer(module).run(os);
+                                          llvm::raw_ostream &os,
+                                          llvm::StringRef gpuChip) {
+  return Serializer(module, gpuChip).run(os);
 }

@@ -60,14 +60,30 @@ typedef enum {
 
 #define HEXIR_NAME_SIZE 32
 
+/* The EXECUTABLES section is a count, then that many entries, then the device
+ * images the entries point at, each 8-byte aligned:
+ *
+ *   [u32 count][u32 reserved][entry x count][image...]
+ *
+ * image_size == 0 means the entry is a descriptor only and the runtime has to
+ * supply the body. That is still the case for cpu kernels. */
 typedef struct {
   char name[HEXIR_NAME_SIZE];
   uint32_t kind;      /* hexir_kernel_kind_t */
   uint32_t device;    /* hexir_device_kind_t: where the compiler placed it */
   uint32_t m, n, k;   /* extents; k is 0 for element-wise kernels */
   uint32_t elem_size; /* bytes per element */
+  uint32_t image_offset; /* from the start of EXECUTABLES; 0 if none */
+  uint32_t image_size;   /* 0 means descriptor only */
+  uint32_t grid_x;       /* launch geometry, from the bound loop extents */
+  uint32_t block_x;
   uint32_t reserved;
 } hexir_executable_entry_t;
+
+typedef struct {
+  uint32_t count;
+  uint32_t reserved;
+} hexir_executable_header_t;
 
 typedef struct {
   char name[HEXIR_NAME_SIZE];

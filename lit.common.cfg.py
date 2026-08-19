@@ -62,6 +62,13 @@ if os.path.exists(hexir):
     config.substitutions.append(("%hexir", hexir))
 config.substitutions.append(("FileCheck", filecheck))
 
+# MLIR's NVVM target finds libdevice through these, and Ubuntu's toolkit does
+# not use NVIDIA's directory layout, so a shim path is often needed. Pass them
+# through rather than letting tests fail on a missing libdevice.
+for var in ("CUDA_ROOT", "CUDA_HOME", "CUDA_PATH"):
+    if var in os.environ:
+        config.environment[var] = os.environ[var]
+
 # Tests needing the CUDA toolkit are gated `REQUIRES: cuda`.
 if shutil.which("nvcc"):
     config.available_features.add("cuda")

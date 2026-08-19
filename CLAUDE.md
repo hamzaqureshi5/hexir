@@ -85,8 +85,13 @@ everything the compiler can currently produce is straight-line dataflow, so an i
 branches would be unused machinery. Bytecode becomes necessary with dynamic shapes or control
 flow. Buffers are referred to by slot, a dense index space `ModuleSerializer` assigns.
 
-**What is stubbed, and it matters:** the EXECUTABLES section carries kernel *descriptors*
-(kind + extents + placement), not machine code. The runtime supplies the bodies from
+**cuda kernels now carry real device code; cpu kernels are still descriptors.** For a
+cuda-placed kernel, `-emit=hxb` lowers `hextir` → `gpu` → NVVM → CUBIN (`compiler/Serialization`
+runs that pipeline on a *clone*, since the module being serialized must stay at the kernel level)
+and embeds the image, so `hexir-run --device=cuda` executes it on the GPU with no compiler
+present. Kernels use **bare-pointer calling convention**, so a kernel argument is one device
+address rather than a seven-scalar memref descriptor. A cpu kernel still carries only a
+descriptor The runtime supplies the bodies from
 `src/kernels/reference_kernels.c`. That was the way to make the container, loader, HAL and command
 list real and testable end to end; embedding a CUBIN from `gpu.binary`, or a host object, replaces
 the descriptors without changing the container or the command list. Until then a module is

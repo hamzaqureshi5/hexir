@@ -61,6 +61,18 @@ hexir_status_t hexir_buffer_write(hexir_buffer_t *dst, const void *src,
 hexir_status_t hexir_buffer_read(const hexir_buffer_t *src, void *dst,
                                  size_t size);
 
+/// Launch a device image. `image` is whatever the compiler embedded (a CUDA
+/// fatbinary today) and `entry` names the kernel inside it. Arguments are
+/// passed by bare pointer -- one device address per buffer -- which is why the
+/// compiler builds the kernel with useBarePtrCallConv.
+///
+/// Returns HEXIR_ERROR_UNIMPLEMENTED on a backend that cannot launch, which is
+/// the CPU one.
+hexir_status_t hexir_device_launch(hexir_device_t *device, const void *image,
+                                   size_t image_size, const char *entry,
+                                   unsigned grid_x, unsigned block_x,
+                                   hexir_buffer_t **args, unsigned arg_count);
+
 #ifdef __cplusplus
 }
 #endif

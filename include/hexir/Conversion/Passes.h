@@ -23,6 +23,11 @@ std::unique_ptr<Pass> createLowerToLinalgPass();
 /// hexir.call_tir; the `device` attr picks the loop kinds.
 std::unique_ptr<Pass> createLowerToTIRPass();
 
+/// hextir -> gpu. Turns a cuda-placed prim func into a gpu.module kernel,
+/// mapping thread_binding loops onto hardware indices. This is what makes a
+/// hextir kernel compilable to a CUBIN.
+std::unique_ptr<Pass> createHexTIRToGPUPass();
+
 /// hexir -> affine. Built but not wired into any pipeline.
 std::unique_ptr<Pass> createLowerToAffinePass();
 

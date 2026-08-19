@@ -27,6 +27,8 @@ typedef int CUresult;
 typedef int CUdevice;
 typedef void *CUcontext;
 typedef unsigned long long CUdeviceptr;
+typedef void *CUmodule;
+typedef void *CUfunction;
 
 #define CUDA_SUCCESS 0
 
@@ -44,6 +46,12 @@ static struct {
   CUresult (*MemcpyHtoD)(CUdeviceptr, const void *, size_t);
   CUresult (*MemcpyDtoH)(void *, CUdeviceptr, size_t);
   CUresult (*GetErrorString)(CUresult, const char **);
+  CUresult (*ModuleLoadData)(CUmodule *, const void *);
+  CUresult (*ModuleUnload)(CUmodule);
+  CUresult (*ModuleGetFunction)(CUfunction *, CUmodule, const char *);
+  CUresult (*LaunchKernel)(CUfunction, unsigned, unsigned, unsigned, unsigned,
+                           unsigned, unsigned, unsigned, void *, void **,
+                           void **);
 } cu;
 
 typedef struct {
@@ -97,6 +105,10 @@ static int cuda_load(void) {
   HEXIR_CU_BIND(MemFree, "cuMemFree_v2");
   HEXIR_CU_BIND(MemcpyHtoD, "cuMemcpyHtoD_v2");
   HEXIR_CU_BIND(MemcpyDtoH, "cuMemcpyDtoH_v2");
+  HEXIR_CU_BIND(ModuleLoadData, "cuModuleLoadData");
+  HEXIR_CU_BIND(ModuleUnload, "cuModuleUnload");
+  HEXIR_CU_BIND(ModuleGetFunction, "cuModuleGetFunction");
+  HEXIR_CU_BIND(LaunchKernel, "cuLaunchKernel");
 #undef HEXIR_CU_BIND
 
   /* Optional: only used to make error messages readable. */
@@ -170,6 +182,68 @@ static void *cuda_buffer_host_pointer(hexir_buffer_t *buffer) {
   return NULL;
 }
 
+/* Loads the image, finds the kernel and launches it.
+ *
+ * The module is loaded per dispatch rather than cached. That is a real cost
+ * and an obvious thing to fix, but correctness first: caching needs a key that
+ * survives the module outliving any one command. */
+static hexir_status_t cuda_launch(hexir_device_t *device, const void *image,
+                                  size_t image_size, const char *entry,
+                                  unsigned grid_x, unsigned block_x,
+                                  hexir_buffer_t **args, unsigned arg_count) {
+  (void)device;
+  (void)image_size; /* the image is self describing */
+
+  CUmodule module = NULL;
+  CUresult result = cu.ModuleLoadData(&module, image);
+  if (result != CUDA_SUCCESS) {
+    fprintf(stderr, "hexir: cannot load device image: %s\n",
+            cuda_error(result));
+    return HEXIR_ERROR_DEVICE;
+  }
+
+  CUfunction function = NULL;
+  result = cu.ModuleGetFunction(&function, module, entry);
+  if (result != CUDA_SUCCESS) {
+    fprintf(stderr, "hexir: no kernel '%s' in the device image: %s\n", entry,
+            cuda_error(result));
+    cu.ModuleUnload(module);
+    return HEXIR_ERROR_NOT_FOUND;
+  }
+
+  /* Bare pointer convention: one device address per buffer, and cuLaunchKernel
+     wants pointers TO the argument values, not the values. */
+  enum { HEXIR_MAX_KERNEL_ARGS = 8 };
+  if (arg_count > HEXIR_MAX_KERNEL_ARGS) {
+    cu.ModuleUnload(module);
+    return HEXIR_ERROR_INVALID_MODULE;
+  }
+  CUdeviceptr addresses[HEXIR_MAX_KERNEL_ARGS];
+  void *params[HEXIR_MAX_KERNEL_ARGS];
+  for (unsigned i = 0; i < arg_count; ++i) {
+    addresses[i] = (CUdeviceptr)(uintptr_t)args[i]->impl;
+    params[i] = &addresses[i];
+  }
+
+  result = cu.LaunchKernel(function, grid_x, 1, 1, block_x, 1, 1, 0, NULL,
+                           params, NULL);
+  if (result != CUDA_SUCCESS) {
+    fprintf(stderr, "hexir: launch of '%s' failed: %s\n", entry,
+            cuda_error(result));
+    cu.ModuleUnload(module);
+    return HEXIR_ERROR_DEVICE;
+  }
+
+  result = cu.CtxSynchronize();
+  cu.ModuleUnload(module);
+  if (result != CUDA_SUCCESS) {
+    fprintf(stderr, "hexir: kernel '%s' faulted: %s\n", entry,
+            cuda_error(result));
+    return HEXIR_ERROR_DEVICE;
+  }
+  return HEXIR_OK;
+}
+
 static hexir_status_t cuda_wait(hexir_device_t *device) {
   (void)device;
   CUresult result = cu.CtxSynchronize();
@@ -200,6 +274,7 @@ static const hexir_device_vtable_t kCudaVtable = {
     cuda_buffer_write,
     cuda_buffer_read,
     cuda_buffer_host_pointer,
+    cuda_launch,
     cuda_wait,
     cuda_release,
 };

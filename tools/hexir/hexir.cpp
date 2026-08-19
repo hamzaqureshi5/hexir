@@ -444,7 +444,7 @@ int main(int argc, char **argv) {
                    << "': " << ec.message() << "\n";
       return 1;
     }
-    if (mlir::failed(mlir::hexir::serializeToHXB(*module, os)))
+    if (mlir::failed(mlir::hexir::serializeToHXB(*module, os, gpuChip)))
       return 1;
     llvm::errs() << "wrote " << outputFilename << "\n";
     return 0;

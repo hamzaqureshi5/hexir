@@ -1,0 +1,1 @@
+hexir_library(HexTIRToGPU HexTIRToGPU.cpp DEPENDS HexTIROpsIncGen HexirOpsIncGen)

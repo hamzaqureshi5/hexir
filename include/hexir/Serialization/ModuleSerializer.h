@@ -17,7 +17,8 @@ namespace hexir {
 
 /// Serialize `module` to the runtime's container format. `module` must be at
 /// the kernel level -- run the pipeline to Stage::TIR first.
-LogicalResult serializeToHXB(ModuleOp module, llvm::raw_ostream &os);
+LogicalResult serializeToHXB(ModuleOp module, llvm::raw_ostream &os,
+                             llvm::StringRef gpuChip = "sm_75");
 
 } // namespace hexir
 } // namespace mlir

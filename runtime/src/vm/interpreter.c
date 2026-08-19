@@ -35,6 +35,9 @@ typedef struct {
   uint64_t rodata_size;
   const hexir_executable_entry_t *executables;
   uint32_t executable_count;
+  /* Base of the EXECUTABLES section: entry image offsets are relative to it. */
+  const uint8_t *executable_base;
+  uint64_t executable_size;
 } vm_state_t;
 
 static void vm_release(vm_state_t *vm) {
@@ -89,13 +92,31 @@ static hexir_status_t vm_dispatch(vm_state_t *vm, const uint64_t *operands,
   }
 
   /* Destination is the last argument: prim funcs are destination-passing. */
-  double *args[4];
   if (arg_count > 4)
     return HEXIR_ERROR_INVALID_MODULE;
+  for (uint64_t i = 0; i < arg_count; ++i)
+    if (!vm_slot(vm, operands[2 + i]))
+      return HEXIR_ERROR_INVALID_MODULE;
+
+  /* Real device code in the module: hand it to the HAL and let the device run
+     it. This is the path that makes a .hxb a compiled artifact rather than a
+     description of one. */
+  if (exe->image_size) {
+    if ((uint64_t)exe->image_offset + exe->image_size > vm->executable_size)
+      return HEXIR_ERROR_INVALID_MODULE;
+    hexir_buffer_t *buffers[4];
+    for (uint64_t i = 0; i < arg_count; ++i)
+      buffers[i] = vm_slot(vm, operands[2 + i]);
+    return hexir_device_launch(vm->device,
+                               vm->executable_base + exe->image_offset,
+                               exe->image_size, exe->name, exe->grid_x,
+                               exe->block_x, buffers, (unsigned)arg_count);
+  }
+
+
+  double *args[4];
   for (uint64_t i = 0; i < arg_count; ++i) {
     hexir_buffer_t *buffer = vm_slot(vm, operands[2 + i]);
-    if (!buffer)
-      return HEXIR_ERROR_INVALID_MODULE;
     args[i] = (double *)hexir_buffer_host_pointer(buffer);
     if (!args[i]) {
       /* Device-local memory, and the reference kernels run on the host. The
@@ -140,17 +161,33 @@ static hexir_status_t vm_print(vm_state_t *vm, uint64_t slot, uint64_t rows,
   hexir_buffer_t *buffer = vm_slot(vm, slot);
   if (!buffer)
     return HEXIR_ERROR_INVALID_MODULE;
-  if (rows * cols * sizeof(double) > hexir_buffer_size(buffer))
+  size_t bytes = (size_t)rows * cols * sizeof(double);
+  if (bytes > hexir_buffer_size(buffer))
     return HEXIR_ERROR_INVALID_MODULE;
 
+  /* Device memory is not host addressable, so this is a real device to host
+     transfer. hexir_buffer_read IS that copy -- printing a result computed on
+     the GPU is what pulls it back. */
   const double *data = (const double *)hexir_buffer_host_pointer(buffer);
-  if (!data)
-    return HEXIR_ERROR_DEVICE;
+  double *staging = NULL;
+  if (!data) {
+    staging = (double *)malloc(bytes);
+    if (!staging)
+      return HEXIR_ERROR_OUT_OF_MEMORY;
+    hexir_status_t status = hexir_buffer_read(buffer, staging, bytes);
+    if (status != HEXIR_OK) {
+      free(staging);
+      return status;
+    }
+    data = staging;
+  }
+
   for (uint64_t i = 0; i < rows; ++i) {
     for (uint64_t j = 0; j < cols; ++j)
       printf("%f ", data[i * cols + j]);
     printf("\n");
   }
+  free(staging);
   return HEXIR_OK;
 }
 
@@ -179,9 +216,20 @@ hexir_status_t hexir_execute(const hexir_module_t *module,
     vm.rodata_size = size;
   }
   if (hexir_module_section(module, HEXIR_SECTION_EXECUTABLES, &data, &size) ==
-      HEXIR_OK) {
-    vm.executables = (const hexir_executable_entry_t *)data;
-    vm.executable_count = (uint32_t)(size / sizeof(hexir_executable_entry_t));
+          HEXIR_OK &&
+      size >= sizeof(hexir_executable_header_t)) {
+    const hexir_executable_header_t *header =
+        (const hexir_executable_header_t *)data;
+    uint64_t table = sizeof(*header) +
+                     (uint64_t)header->count * sizeof(hexir_executable_entry_t);
+    if (table > size)
+      return HEXIR_ERROR_INVALID_MODULE;
+    vm.executables =
+        (const hexir_executable_entry_t *)((const uint8_t *)data +
+                                           sizeof(*header));
+    vm.executable_count = header->count;
+    vm.executable_base = (const uint8_t *)data;
+    vm.executable_size = size;
   }
 
   const hexir_symbol_entry_t *symbols =
