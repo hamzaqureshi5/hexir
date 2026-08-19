@@ -5,12 +5,12 @@ but answers a different question about it.
 
 ```mermaid
 flowchart TD
-    G["<b>Graph</b> — hexir dialect<br/>what to compute"]
-    P["<b>Placement</b><br/>where each op runs"]
-    K["<b>Kernel</b> — hextir dialect<br/>how one device computes it"]
-    L["<b>Loops and buffers</b> — linalg, memref, scf<br/>the actual loop nests"]
-    M["<b>Machine</b> — LLVM, NVVM<br/>instructions"]
-    A["<b>.hxb file</b><br/>something you can ship"]
+    G["Graph — hexir dialect<br/>what to compute"]
+    P["Placement<br/>where each op runs"]
+    K["Kernel — hextir dialect<br/>how one device computes it"]
+    L["Loops and buffers — linalg, memref, scf<br/>the actual loop nests"]
+    M["Machine — LLVM, NVVM<br/>instructions"]
+    A[".hxb file<br/>something you can ship"]
 
     G --> P --> K --> L --> M
     K --> A

@@ -131,6 +131,17 @@ cd build && make check-hexir-runtime      # runtime only
 The compiler and the runtime each own their tests, in `compiler/test/` and
 `runtime/test/`.
 
+The runtime suite also runs standalone, against a module checked in at
+`runtime/test/fixtures/`, so it needs no MLIR:
+
+```bash
+cmake -S runtime -B build-runtime && cmake --build build-runtime
+lit runtime/test --param build_dir=$PWD/build-runtime
+```
+
+That is what CI runs. The compiler is not covered yet: it needs an unreleased
+LLVM, so no packaged MLIR can build it.
+
 ## Layout
 
 ```

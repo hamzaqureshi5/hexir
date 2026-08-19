@@ -10,11 +10,11 @@ compiler like IREE is enormous, and Hexir sits in the middle.
 
 ```mermaid
 flowchart LR
-    A["your program<br/><i>tensors</i>"] --> B["decide<br/>where each op runs"]
+    A["your program<br/>tensors"] --> B["decide<br/>where each op runs"]
     B --> C["turn each op<br/>into a kernel"]
-    C --> D["run it now<br/><i>JIT</i>"]
-    C --> E["write a file<br/><i>.hxb</i>"]
-    E --> F["run it later<br/><i>hexir-run</i>"]
+    C --> D["run it now<br/>JIT"]
+    C --> E["write a file<br/>.hxb"]
+    E --> F["run it later<br/>hexir-run"]
 ```
 
 Two ways to run the same program:
@@ -32,33 +32,6 @@ If you want to understand *how it works*, read [How it works](overview.md)
 first. It is a picture and eight paragraphs. Then pick whichever of the
 detailed pages you need.
 
-```{toctree}
-:maxdepth: 2
-:caption: Using Hexir
-
-getting-started
-```
-
-```{toctree}
-:maxdepth: 2
-:caption: How it works
-
-overview
-ir-levels
-pipeline
-runtime
-```
-
-```{toctree}
-:maxdepth: 2
-:caption: Reference
-
-reference/cli
-reference/dialects
-reference/layout
-cuda-server
-```
-
 ## Where it stands
 
 Hexir is research software. Some parts are finished and some are scaffolding,
@@ -69,3 +42,31 @@ and the docs say which is which rather than leaving you to find out.
 | CPU path, end to end | GPU kernels are one block, one thread | Transfer insertion in the JIT path |
 | Per-operation placement | CPU kernels in `.hxb` are descriptions, not code | Memory planning |
 | `.hxb` artifacts, CPU **and GPU** | | More operations, and a frontend |
+
+```{toctree}
+:hidden:
+:maxdepth: 2
+:caption: Using Hexir
+
+getting-started
+```
+```{toctree}
+:hidden:
+:maxdepth: 2
+:caption: How it works
+
+overview
+ir-levels
+pipeline
+runtime
+```
+```{toctree}
+:hidden:
+:maxdepth: 2
+:caption: Reference
+
+reference/cli
+reference/dialects
+reference/layout
+cuda-server
+```

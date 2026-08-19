@@ -98,7 +98,7 @@ pattern-matching on loop structure.
 
 ```mermaid
 flowchart LR
-    A["<b>hexir</b><br/>tensors<br/>returns a value"] -->|hexir.call_tir| B["<b>hextir</b><br/>buffers<br/>writes into an output"]
+    A["hexir<br/>tensors<br/>returns a value"] -->|hexir.call_tir| B["hextir<br/>buffers<br/>writes into an output"]
 ```
 
 ```mlir
