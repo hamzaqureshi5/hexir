@@ -15,8 +15,8 @@ flowchart TD
 
     T -->|linalg and beyond| L1["partition"]
     L1 --> L2["lower-to-linalg"]
-    L2 --> L3["partition again<br/><i>safety net</i>"]
-    L3 --> L6["bufferize<br/><i>tensors become memrefs</i>"]
+    L2 --> L3["partition again<br/>safety net"]
+    L3 --> L6["bufferize<br/>tensors become memrefs"]
     L6 --> L7["cuda ops to gpu.launch"]
     L7 --> L8["linalg to loops"]
     L8 --> L9["outline kernels, NVVM, CUBIN"]

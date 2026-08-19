@@ -9,3 +9,6 @@ scripts/mlp_mlir
 
 # Sphinx build output
 docs/_build/
+
+# Local guidance for AI assistants; not part of the project
+CLAUDE.md

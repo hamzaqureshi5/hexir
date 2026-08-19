@@ -10,11 +10,11 @@ compiler like IREE is enormous, and Hexir sits in the middle.
 
 ```mermaid
 flowchart LR
-    A["your program<br/><i>tensors</i>"] --> B["decide<br/>where each op runs"]
+    A["your program<br/>tensors"] --> B["decide<br/>where each op runs"]
     B --> C["turn each op<br/>into a kernel"]
-    C --> D["run it now<br/><i>JIT</i>"]
-    C --> E["write a file<br/><i>.hxb</i>"]
-    E --> F["run it later<br/><i>hexir-run</i>"]
+    C --> D["run it now<br/>JIT"]
+    C --> E["write a file<br/>.hxb"]
+    E --> F["run it later<br/>hexir-run"]
 ```
 
 Two ways to run the same program:
