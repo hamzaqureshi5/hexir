@@ -1,7 +1,7 @@
 # The pass pipeline
 
 All pass ordering lives in one function: `buildHexirPipeline` in
-`lib/Pipelines/Pipelines.cpp`. It adds passes and returns as soon as it reaches
+`compiler/Pipelines/Pipelines.cpp`. It adds passes and returns as soon as it reaches
 the stage you asked for, and the driver runs the whole thing once.
 
 ```mermaid
@@ -50,7 +50,7 @@ was built with `hexir.func` ops.
 ### Placement
 
 `hexir-partition` writes `device = "cpu"` or `device = "cuda"` on each op,
-reading from the `TargetSupport` registry in `lib/Target/TargetInfo.cpp`. The
+reading from the `TargetSupport` registry in `compiler/Target/TargetInfo.cpp`. The
 `-placement` flag overrides that registry before any pass runs.
 
 It runs **before** lowering, so the decision can travel with the op. It skips
@@ -91,7 +91,7 @@ at some point:
    `linalg.fill`.
 3. **Every tensor op needs a `BufferizableOpInterface`**, and for most dialects
    that comes from an external model you must register. `hexir.print` gets one
-   from `lib/Support/BufferizableOpInterfaceImpl.cpp`.
+   from `compiler/Support/BufferizableOpInterfaceImpl.cpp`.
 
 When this goes wrong you get `error: op was not bufferized` with no location.
 Run with `--mlir-print-ir-after-failure` and look for what still has tensor

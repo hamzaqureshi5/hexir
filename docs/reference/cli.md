@@ -7,7 +7,7 @@ hexir [-emit=<stage>] [-o <file>] [-opt] [-placement=<op>=<device>,...] [input.m
 ```
 
 With no input file, the compiler builds a small program in C++
-(`lib/Support/Builder.cpp`) and compiles that instead.
+(`compiler/Support/Builder.cpp`) and compiles that instead.
 
 ### -emit
 

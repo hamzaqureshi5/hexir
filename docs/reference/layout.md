@@ -1,7 +1,7 @@
 # Source layout
 
 The project follows the layout MLIR and IREE use: public headers and TableGen
-under `include/`, implementations mirrored under `lib/`, tools separate.
+under `include/`, implementations mirrored under `compiler/`, tools separate.
 
 ```text
 include/hexir/
@@ -14,15 +14,19 @@ include/hexir/
   Serialization/             the .hxb writer
   Target/, Support/
 
-lib/
+compiler/
   Dialect/<Name>/{IR,Transforms}/
   Conversion/<A>To<B>/       one directory per conversion
   Pipelines/  Serialization/  Target/  Support/
+  test/                      compiler tests (need only `hexir`)
+
+runtime/                     the standalone C runtime
+  include/  src/  tools/
+  test/                      artifact tests (run `hexir-run`)
 
 tools/hexir/                 the compiler driver
-runtime/                     the standalone C runtime
-test/                        lit + FileCheck
 cmake/HexirLibrary.cmake     the hexir_library() helper
+lit.common.cfg.py            shared test configuration
 ```
 
 ## Transforms or Conversion?
@@ -51,6 +55,27 @@ So:
 
 That is deliberate. Which module a file belongs to should be a decision, not a
 side effect of where it was saved.
+
+## Tests live with what they test
+
+The compiler and the runtime each own a suite.
+
+`compiler/test/`
+: Needs only the `hexir` binary. Pipeline stages, dialects, placement.
+
+`runtime/test/`
+: Runs `hexir-run`. These are the artifact tests — they invoke `hexir` as well,
+  but what they assert is the runtime's behaviour, and a test belongs with the
+  binary whose behaviour it asserts.
+
+```bash
+make check-hexir            # both
+make check-hexir-compiler   # one
+make check-hexir-runtime    # the other
+```
+
+Both suites load `lit.common.cfg.py` from the repo root, so build-directory and
+tool discovery is written once and the two cannot drift apart.
 
 ## The runtime is separate
 

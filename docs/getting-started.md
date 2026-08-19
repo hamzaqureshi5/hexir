@@ -108,7 +108,8 @@ The suite needs `lit` and `FileCheck`:
 
 ```bash
 pip install lit
-cd build && make check-hexir
+cd build && make check-hexir             # both suites
+cd build && make check-hexir-runtime     # just the runtime
 ```
 
 Some checked-in tests currently fail. That is a known state, not a broken

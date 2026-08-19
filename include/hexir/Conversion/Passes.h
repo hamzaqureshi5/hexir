@@ -1,7 +1,7 @@
 //===- Passes.h - Hexir conversions ----------------------------*- C++ -*-===//
 //
 // Passes that lower one dialect into another. Each has an implementation
-// directory under lib/Conversion named for the pair it converts.
+// directory under compiler/Conversion named for the pair it converts.
 //
 //===----------------------------------------------------------------------===//
 

@@ -24,7 +24,7 @@ The binary is pinned to `build/hexir` (`RUNTIME_OUTPUT_DIRECTORY` in
 `tools/hexir/CMakeLists.txt`) because `test/lit.cfg.py`, the readme and docs all refer to it.
 
 **Layout** (MLIR/IREE convention: public headers and TableGen under `include/hexir/`,
-implementations mirrored under `lib/`):
+implementations mirrored under `compiler/`):
 
 ```
 include/hexir/
@@ -34,7 +34,7 @@ include/hexir/
   Pipelines/Pipelines.h                 the pass pipeline, and the Stage enum
   Serialization/ModuleSerializer.h      emit a loadable module
   Target/, Support/
-lib/
+compiler/
   Dialect/<Name>/{IR,Transforms}/       mirrors include/
   Conversion/<A>To<B>/                  one directory per conversion
   Pipelines/                            pass ordering
@@ -77,7 +77,7 @@ bounds-checked before any pointer is handed out.
 
 `runtime/include/hexir_runtime/program.h` defines the PROGRAM/EXECUTABLES encoding and is the
 **contract between the two halves**. It lives on the runtime side deliberately: the compiler emits
-the format the runtime defines, and `lib/Serialization` includes it. Headers only — nothing links
+the format the runtime defines, and `compiler/Serialization` includes it. Headers only — nothing links
 back, and the dependency must never point the other way.
 
 The host program is a flat command list (`ALLOC`/`CONST`/`DISPATCH`/`PRINT`/`END`), not bytecode:
@@ -105,13 +105,26 @@ HAL backends, not compiler backends.
 lit/FileCheck suite in `test/`. Requires `lit` (pip) and `FileCheck` (system LLVM; the config
 searches PATH then `/usr/lib/llvm-{20,19,18,14}/bin`).
 
+The compiler and the runtime each own their tests:
+
 ```bash
-cd build && make check-hexir              # full suite
-lit -v test                               # from repo root (auto-finds ./build)
-lit -v test --param build_dir=/path/build
-lit -v test/jit-cpu.mlir                  # single test
-lit -v test --filter=jit
+cd build && make check-hexir              # both suites, one lit run
+cd build && make check-hexir-compiler     # compiler/test only
+cd build && make check-hexir-runtime      # runtime/test only
+
+lit -v compiler/test runtime/test         # from repo root (auto-finds ./build)
+lit -v runtime/test --param build_dir=/path/build
+lit -v compiler/test/jit-cpu.mlir         # single test
 ```
+
+`compiler/test/` needs only `hexir`. `runtime/test/` runs `hexir-run`, and holds the artifact
+tests — they invoke `hexir` too, but the behaviour under test is the runtime's, and a test belongs
+with the binary whose behaviour it asserts.
+
+Both read `lit.common.cfg.py` at the repo root via `lit_config.load_config`, which does all the
+build-dir and tool discovery so the two cannot drift. That function runs the file in its own
+namespace, so anything a suite needs is hung off `config` (`config.hexir_binary`,
+`config.hexir_run_binary`, `config.hexir_build_dir`).
 
 Tests that need the CUDA toolkit are gated `REQUIRES: cuda` (lit enables that feature when
 `nvcc` is on PATH): `jit.mlir`, `llvm-ir.mlir`, `lower-to-llvm.mlir`.
@@ -121,7 +134,7 @@ Tests that need the CUDA toolkit are gated `REQUIRES: cuda` (lit enables that fe
 - `RUN: %hexir -emit=... %s` — compiles the file. `loadMLIR` parses `inputFilename` when it is
   not `-`. Diagnostics carry real source locations. Use this for anything dialect-level.
 - `RUN: %hexir -emit=...` (no file) — compiles the program *built in C++* by
-  `builder::createMLPLinearFunction` (`lib/Support/Builder.cpp`). All the emit-stage tests are this kind,
+  `builder::createMLPLinearFunction` (`compiler/Support/Builder.cpp`). All the emit-stage tests are this kind,
   which is why they assert on a 2x2 matmul nobody can see in the test file. To change what they
   compile, edit `Builder.cpp`. Everything is built with `UnknownLoc`, so errors have no location.
 
@@ -148,12 +161,12 @@ prints `8 17 / 12 14`. `-emit=jit -placement=hexir.linear=cuda` needs the toolki
 CPU-only box during `gpu-module-to-binary`.
 
 `-emit=mlir-affine` exists in the `Action` enum but no affine pass is wired into the pipeline
-(`createLowerToAffinePass` in `lib/Conversion/HexirToAffine/` is declared and built but never
+(`createLowerToAffinePass` in `compiler/Conversion/HexirToAffine/` is declared and built but never
 added to a PassManager). `-emit=ast` is a stub.
 
 ## Architecture
 
-Pass ordering lives in `buildHexirPipeline` (`lib/Pipelines/Pipelines.cpp`) — the single source of
+Pass ordering lives in `buildHexirPipeline` (`compiler/Pipelines/Pipelines.cpp`) — the single source of
 truth. It only *adds* passes and returns early once it has reached the requested stage; the driver
 runs the `PassManager` exactly once. Stage gating uses `>=` on the **ordered** `hexir::Stage` enum
 (`include/hexir/Pipelines/Pipelines.h`), so enum order is semantically load-bearing — reordering
@@ -201,11 +214,11 @@ Pass order and the files implementing each:
 
 Dialects (three of them):
 
-- `hexir` — `include/hexir/Dialect/Hexir/IR/HexirOps.td` + `lib/Dialect/Hexir/IR/HexirDialect.cpp`. Frontend NN ops. Many ops
+- `hexir` — `include/hexir/Dialect/Hexir/IR/HexirOps.td` + `compiler/Dialect/Hexir/IR/HexirDialect.cpp`. Frontend NN ops. Many ops
   (`sigmoid`, `softmax`, `gelu`, `swish`, `mish`, `tanh`, `elu`, `leaky_relu`) are *declared in
   TableGen but have no lowering pattern* — only `constant`, `add`, `relu`, `linear`, `print`,
   and `hexir.func` are supported end to end.
-- `hextir` — `include/hexir/Dialect/HexTIR/IR/HexTIROps.td` + `lib/Dialect/HexTIR/IR/HexTIRDialect.cpp`. The **kernel
+- `hextir` — `include/hexir/Dialect/HexTIR/IR/HexTIROps.td` + `compiler/Dialect/HexTIR/IR/HexTIRDialect.cpp`. The **kernel
   level**: `prim_func` (destination-passing over memrefs, `FunctionOpInterface`), `block` (named
   schedulable region), `for` (with `kind` = serial/parallel/vectorized/unrolled/thread_binding —
   this attribute *is* the schedule), `alloc_buffer`, `buffer_load`/`buffer_store`, `yield`,
@@ -214,24 +227,24 @@ Dialects (three of them):
   and hands loop nests to `scf`/`memref`/`gpu` rather than reimplementing a scheduling language.
   Produced by `hexir-lower-to-tir` (`-emit=mlir-tir`). Nothing lowers *out* of it yet, so that
   stage is terminal.
-- `ls_cpu` / `ls_gpu` — `include/hexir/Dialect/LS/IR/LSDialects.td` + `lib/Dialect/LS/IR/LSDialects.cpp`.
+- `ls_cpu` / `ls_gpu` — `include/hexir/Dialect/LS/IR/LSDialects.td` + `compiler/Dialect/LS/IR/LSDialects.cpp`.
   Mirror-image `add`/`mul`/`matmul`/`relu` ops that exist only to make placement legible in
   `-emit=mlir-hetero`. Adding an op means adding it to *both* dialects plus a pattern in
   `MaterializeLSTargets.cpp` and `LowerLSToLinalg.cpp`.
 
-Placement registry: `lib/Target/TargetInfo.cpp` — a singleton `TargetSupport` mapping op names to
+Placement registry: `compiler/Target/TargetInfo.cpp` — a singleton `TargetSupport` mapping op names to
 supported targets (`opSupports_`) and a preferred target (`opPreferred_`). `"gpu"` normalizes to
 `"cuda"`. Unregistered ops default to CPU. The `-placement <op>=<device>` flag calls
 `setPreferredTarget` before any pass runs, and rejects op/device pairs absent from `opSupports_`.
 Keys are frontend op names (`hexir.linear`), because partitioning happens pre-lowering.
 
-Bufferization (`lib/Support/BufferizableOpInterfaceImpl.cpp`): One-Shot Bufferize only knows how to
+Bufferization (`compiler/Support/BufferizableOpInterfaceImpl.cpp`): One-Shot Bufferize only knows how to
 convert ops that implement `BufferizableOpInterface`, and for most dialects that interface comes
 from an **external model that has to be registered explicitly** in `main.cpp`. Hexir registers
 five: `bufferization` (needed for its own `alloc_tensor`), `func_ext`, `arith`, `linalg`,
 `tensor`, plus its own model for `hexir.print` (read-only, no results). A missing registration
 shows up as the unhelpful `error: op was not bufferized` with no location, because
-`lib/Support/Builder.cpp` builds everything with `UnknownLoc`. To find the offending op, run with
+`compiler/Support/Builder.cpp` builds everything with `UnknownLoc`. To find the offending op, run with
 `--mlir-print-ir-after-failure` and look for what still has tensor operands — `to_tensor` and
 `to_buffer` are allowed in the output, anything else is the culprit.
 
@@ -248,7 +261,7 @@ rewrites — currently all patterns are commented out; only `ConstantOp::fold` i
 
 ## Gotchas
 
-- **5 of 14 checked-in tests fail, for two reasons unrelated to the compiler.**
+- **5 of 14 checked-in tests fail (all in the compiler suite; the runtime suite is green), for two reasons unrelated to the compiler.**
   `TargetInfo.cpp` sets `opPreferred_["hexir.linear"] = "cpu"` (with a comment claiming GPU), and
   the relu call in `createMLPLinearFunction` is commented out — so `-emit=mlir-hetero` emits
   `ls_cpu.matmul` and no relu, while `partition-hetero.mlir`, `placement-flag.mlir`
@@ -277,7 +290,7 @@ rewrites — currently all patterns are commented out; only `ConstantOp::fold` i
 - The JIT loads `/usr/local/lib/libmlir_c_runner_utils.so` and
   `libmlir_cuda_runtime.so` only if they exist (`main.cpp::runJit`); neither is present on this
   machine and the CPU path works anyway, since `printf` resolves from libc.
-- `lib/` still carries Toy-tutorial provenance in comments and file headers; naming is
+- `compiler/` still carries Toy-tutorial provenance in comments and file headers; naming is
   inconsistent (`hexir::FuncOp` vs `func::FuncOp` — the shape-inference pass nests on the
   former, which only exists if `hexir.func` ops are built).
 - **Docs are a Sphinx site in `docs/`**, published to GitHub Pages by

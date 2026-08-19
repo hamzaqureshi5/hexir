@@ -107,7 +107,7 @@ void mlir::hexir::buildHexirPipeline(PassManager &pm,
   bufferization::OneShotBufferizePassOptions bufferizeOpts;
   // Keep allowUnknownOps=false: every tensor op must have a
   // BufferizableOpInterface (hexir.print gets one from
-  // lib/Support/BufferizableOpInterfaceImpl.cpp), so a genuine gap is reported
+  // compiler/Support/BufferizableOpInterfaceImpl.cpp), so a genuine gap is reported
   // as a failure rather than silently leaving tensors in the IR.
   // IdentityLayoutMap keeps materialized buffers as plain memrefs, which is
   // what hexir.print's F64MemRef constraint and the printf lowering expect.

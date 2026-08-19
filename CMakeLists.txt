@@ -127,21 +127,41 @@ set(HEXIR_MLIR_LIBS
           MLIRNVVMTarget
           LLVMSupport)
 
-# include/ generates the TableGen .inc files; lib/ builds the module libraries
+# include/ generates the TableGen .inc files; compiler/ builds the module libraries
 # and registers them in the HEXIR_LIBS global property; tools/ links them.
 add_subdirectory(include)
-add_subdirectory(lib)
+add_subdirectory(compiler)
 add_subdirectory(tools)
 
-# Lit test suite: `make check-hexir` runs FileCheck tests in test/.
+# Lit test suites. The compiler and the runtime each own their tests:
+#   compiler/test  needs only `hexir`
+#   runtime/test   runs `hexir-run` on modules `hexir` produced
 find_program(LLVM_LIT_EXECUTABLE NAMES llvm-lit lit)
 if(LLVM_LIT_EXECUTABLE)
-  add_custom_target(check-hexir
-    COMMAND ${LLVM_LIT_EXECUTABLE} -v ${CMAKE_CURRENT_SOURCE_DIR}/test
-            --param build_dir=${CMAKE_CURRENT_BINARY_DIR}
+  set(HEXIR_LIT_ARGS -v --param build_dir=${CMAKE_CURRENT_BINARY_DIR})
+
+  add_custom_target(check-hexir-compiler
+    COMMAND ${LLVM_LIT_EXECUTABLE} ${HEXIR_LIT_ARGS}
+            ${CMAKE_CURRENT_SOURCE_DIR}/compiler/test
     DEPENDS hexir
-    COMMENT "Running Hexir lit tests"
+    COMMENT "Running Hexir compiler tests"
+    USES_TERMINAL)
+
+  add_custom_target(check-hexir-runtime
+    COMMAND ${LLVM_LIT_EXECUTABLE} ${HEXIR_LIT_ARGS}
+            ${CMAKE_CURRENT_SOURCE_DIR}/runtime/test
+    DEPENDS hexir hexir-run
+    COMMENT "Running Hexir runtime tests"
+    USES_TERMINAL)
+
+  # Both suites in one lit invocation, so the summary counts everything.
+  add_custom_target(check-hexir
+    COMMAND ${LLVM_LIT_EXECUTABLE} ${HEXIR_LIT_ARGS}
+            ${CMAKE_CURRENT_SOURCE_DIR}/compiler/test
+            ${CMAKE_CURRENT_SOURCE_DIR}/runtime/test
+    DEPENDS hexir hexir-run
+    COMMENT "Running all Hexir tests"
     USES_TERMINAL)
 else()
-  message(WARNING "lit not found: check-hexir target unavailable (pip install lit)")
+  message(WARNING "lit not found: check-hexir targets unavailable (pip install lit)")
 endif()

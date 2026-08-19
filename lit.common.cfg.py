@@ -1,42 +1,29 @@
 # -*- Python -*-
-# Lit configuration for the Hexir test suite.
+# Shared lit configuration.
 #
-# Standalone config: locates the hexir binary in the CMake build directory
-# and FileCheck from the system LLVM. Run with either:
-#   cd build && make check-hexir
-#   lit -v test                      (from the repo root)
-#   lit -v test --param build_dir=/path/to/build
+# Loaded by compiler/test/lit.cfg.py and runtime/test/lit.cfg.py, which set
+# `config.name` and their own required tools. Everything to do with finding the
+# build directory and the tools lives here so the two suites cannot drift.
 
 import os
 import shutil
 
 import lit.formats
 
-config.name = "Hexir"
 config.test_format = lit.formats.ShTest(execute_external=False)
 config.suffixes = [".mlir", ".test"]
-config.test_source_root = os.path.dirname(__file__)
 
-# Locate the build directory: --param build_dir=..., $HEXIR_BUILD_DIR,
-# or default to <repo>/build.
+# Locate the build directory: --param build_dir=..., $HEXIR_BUILD_DIR, or
+# <repo>/build.
+_repo_root = os.path.dirname(os.path.abspath(__file__))
 build_dir = lit_config.params.get(
     "build_dir",
-    os.environ.get(
-        "HEXIR_BUILD_DIR",
-        os.path.join(config.test_source_root, "..", "build"),
-    ),
+    os.environ.get("HEXIR_BUILD_DIR", os.path.join(_repo_root, "build")),
 )
 build_dir = os.path.abspath(build_dir)
-config.test_exec_root = os.path.join(build_dir, "test")
-
-hexir = os.path.join(build_dir, "hexir")
-if not os.path.exists(hexir):
-    lit_config.fatal(
-        "hexir binary not found at %s — build the project first" % hexir
-    )
 
 
-def find_tool(names, extra_dirs):
+def find_tool(names, extra_dirs=()):
     for name in names:
         path = shutil.which(name)
         if path:
@@ -57,18 +44,24 @@ filecheck = find_tool(
 if not filecheck:
     lit_config.fatal("FileCheck not found in PATH or /usr/lib/llvm-*/bin")
 
+hexir = os.path.join(build_dir, "hexir")
+hexir_run = os.path.join(build_dir, "hexir-run")
+
+# load_config() runs this file in its own namespace, so anything the per-suite
+# configs need has to be hung off `config`.
+config.hexir_build_dir = build_dir
+config.hexir_binary = hexir
+config.hexir_run_binary = hexir_run
+
 # %hexir-run must be registered BEFORE %hexir: lit applies substitutions in
 # order, so the shorter pattern would otherwise eat the prefix of the longer.
-hexir_run = os.path.join(build_dir, "hexir-run")
 if os.path.exists(hexir_run):
     config.substitutions.append(("%hexir-run", hexir_run))
     config.available_features.add("runtime")
-
-config.substitutions.append(("%hexir", hexir))
+if os.path.exists(hexir):
+    config.substitutions.append(("%hexir", hexir))
 config.substitutions.append(("FileCheck", filecheck))
 
-# Expose 'cuda' feature when nvcc (CUDA toolkit) is on PATH.
-# Tests that require full GPU lowering (gpu-module-to-binary, jit) are guarded
-# with REQUIRES: cuda so they are skipped on machines without the toolkit.
+# Tests needing the CUDA toolkit are gated `REQUIRES: cuda`.
 if shutil.which("nvcc"):
     config.available_features.add("cuda")
