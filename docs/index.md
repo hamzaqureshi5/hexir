@@ -63,6 +63,18 @@ runtime
 ```{toctree}
 :hidden:
 :maxdepth: 2
+:caption: Optimizations
+
+optimizations/overview
+optimizations/graph
+optimizations/kernel
+optimizations/memory
+optimizations/execution
+optimizations/llm
+```
+```{toctree}
+:hidden:
+:maxdepth: 2
 :caption: Reference
 
 reference/cli
