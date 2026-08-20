@@ -22,7 +22,7 @@ With no input file, the compiler builds a small program in C++
 | `mlir-gpu` | CUDA-placed ops as `gpu.launch` |
 | `mlir-llvm` | the LLVM dialect |
 | `llvm` | translated LLVM IR |
-| `jit` | compile and run in this process |
+
 
 ### Other options
 
@@ -44,7 +44,8 @@ MLIR's own pass-manager flags work too, including `--print-ir-after-all` and
 ### Examples
 
 ```bash
-hexir -emit=jit                                       # built-in program, CPU
+hexir -emit=hxb -o built-in.hxb                       # built-in program, CPU
+hexir-run built-in.hxb                                # run it
 hexir -emit=mlir-tir -placement=hexir.linear=cuda     # matmul as a GPU kernel
 hexir -emit=hxb -o model.hxb mine.mlir                # ship a file
 hexir -emit=mlir-linalg --print-ir-after-all mine.mlir # watch every pass
