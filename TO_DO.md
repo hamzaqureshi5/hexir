@@ -1,0 +1,1 @@
+mlir-hetero and mlir-gpu must have a proper way to do, pipeline is unorganized
