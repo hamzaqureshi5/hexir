@@ -6,9 +6,12 @@ drawn from the three compilers that have already solved most of it:
 [TVM](https://tvm.apache.org/), [IREE](https://iree.dev/) and
 [XLA](https://openxla.org/xla).
 
-It is a reading list and a design space, not a plan. Every entry names the
-prior art, what it buys, and where it would sit in Hexir. Nothing here is
-implemented.
+It is a reading list and a design space. Every entry names the prior art, what
+it buys, and where it would sit in Hexir. Nothing here is implemented.
+
+For the order to build it in — the phase structure, the three pieces of
+infrastructure worth having first, and milestones with exit criteria — see
+[The plan](plan.md).
 
 ## The three lineages
 

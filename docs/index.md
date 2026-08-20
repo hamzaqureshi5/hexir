@@ -62,6 +62,7 @@ runtime
 :caption: Optimizations
 
 optimizations/overview
+optimizations/plan
 optimizations/graph
 optimizations/kernel
 optimizations/memory
