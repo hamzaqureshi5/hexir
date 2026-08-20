@@ -3,7 +3,7 @@
 
   # Hexir
 
-  **A heterogeneous ML compiler built on MLIR**
+  **Heterogeneous MLIR Compiler for Neural Networks**
 
   *One graph in — partitioned, lowered, and executed across CPU and GPU.*
 
@@ -21,9 +21,19 @@
 
 ---
 
-Hexir (**H**eterogeneous **EX**ecution **IR**) compiles neural-network programs
-through a custom MLIR dialect, decides per operation whether it runs on the CPU
-or the GPU, and either executes it in-process or writes a deployable file.
+Hexir (**H**eterogeneous **EX**ecution **IR**) is an MLIR compiler with two
+custom dialects: a graph level of neural-network operators on tensors, and a
+kernel level where each loop carries its own schedule, so a scheduling decision
+is written in the IR instead of being implied by which pass ran.
+
+A partitioning pass assigns each operator to CPU or CUDA before lowering and
+propagates that placement through every conversion — linalg → bufferization →
+SCF → LLVM IR on the host, GPU dialect → NVVM → CUBIN on the device.
+
+The output is a self-describing artifact with the device code embedded, run by a
+standalone C99 runtime that links no MLIR or LLVM. On a GTX 1660 Ti a GPU matmul
+reaches 47–68 GFLOP/s in f64 against cuBLAS at 123–179, checked against a CPU
+reference.
 
 It is small enough to read. That is deliberate: the gap between MLIR's Toy
 tutorial and a production compiler like IREE is enormous, and Hexir sits in the
