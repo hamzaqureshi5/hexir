@@ -24,9 +24,11 @@ myst_heading_anchors = 3
 # on GitHub, which understands mermaid natively.
 myst_fence_as_directive = ["mermaid"]
 
-# Pygments has no MLIR lexer. The ```mlir fences are kept because they are
-# correct and GitHub highlights them; here they just render unhighlighted.
-suppress_warnings = ["misc.highlighting_failure"]
+# Pygments has no MLIR lexer. We register a fallback so the ```mlir fences
+# can be kept (GitHub highlights them natively).
+from sphinx.highlighting import lexers
+from pygments.lexers.special import TextLexer
+lexers['mlir'] = TextLexer()
 
 templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]

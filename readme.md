@@ -112,9 +112,9 @@ cmake .. -DCMAKE_BUILD_TYPE=Release \
 make -j$(nproc)
 ```
 
-For the GPU path, LLVM must be built with `-DLLVM_TARGETS_TO_BUILD="X86;NVPTX"`
-and `-DMLIR_ENABLE_CUDA_RUNNER=ON`, and a CUDA toolkit must be installed. Full
-commands are in [`docs/llvm-cuda-build.txt`](docs/llvm-cuda-build.txt).
+For the GPU path, LLVM must be built with `-DLLVM_TARGETS_TO_BUILD="X86;NVPTX"`,
+and a CUDA toolkit must be installed. Full commands are in
+[`docs/llvm-cuda-build.txt`](docs/llvm-cuda-build.txt).
 
 ## Testing
 

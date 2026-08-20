@@ -298,7 +298,7 @@ static int loadMLIR(mlir::MLIRContext &context,
   context.getOrLoadDialect<mlir::func::FuncDialect>();
   // Register the MLIR -> LLVM IR translations BEFORE any pass runs.
   // gpu-module-to-binary serializes a gpu.module during the pipeline, and it
-  // needs these; registering them inside runJit/dumpLLVMIR was too late and
+  // needs these; registering them later was too late and
   // failed with "missing LLVMTranslationDialectInterface ... for op:
   // gpu.module" no matter what the CUDA install looked like.
   mlir::registerBuiltinDialectTranslation(context);

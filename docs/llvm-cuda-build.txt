@@ -2,6 +2,8 @@
 Building LLVM/MLIR with CUDA support, for Hexir
 ================================================================================
 
+> **Note:** This is a historical build-session transcript. It reflects behavior from an older version of Hexir (e.g., using JIT and purely scalar GPU kernels) and is not current documentation.
+
 Your current LLVM build at /home/user/llvm-project/build is:
 
     LLVM_TARGETS_TO_BUILD   = host        <- X86 only, no NVPTX

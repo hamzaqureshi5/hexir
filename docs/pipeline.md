@@ -32,8 +32,8 @@ an entry and you change which passes run. Two consequences worth knowing:
   `stage >= Stage::Linalg` false for `-emit=mlir-tir`, which is what makes the
   kernel level a branch off the pipeline rather than a step along it.
 * Anything at or past `Stage::GPU` runs GPU lowering, including `llvm` and
-  `jit`. That is deliberate: a JIT run of a CUDA-placed program has to compile
-  the kernel.
+  `hxb`. That is deliberate: a `.hxb` artifact of a CUDA-placed program has to
+  embed the compiled kernel.
 
 ## The passes
 
@@ -104,10 +104,12 @@ For ops with `device == "cuda"`, `hexir-lower-cuda-to-gpu` builds a
 `ptxas`, and rewrite the host side into CUDA runtime calls.
 
 :::{warning}
-The generated `gpu.launch` uses **one block and one thread**, and its body is a
-sequential loop nest. It is correct but it is not fast — a single CUDA core
-running a scalar loop loses to a CPU at any size. Making the kernel actually
-parallel is the first thing to fix before measuring anything.
+The generated `gpu.launch` uses a 2D launch geometry. The outer loop maps to
+`blockIdx.y`, and the inner loop is split across blocks and threads (`blockIdx.x`
+and `threadIdx.x`). The resulting grid and block extents travel through the
+module descriptor to the HAL, which feeds them to `cuLaunchKernel`. While better
+than a purely scalar loop, this is still a naive schedule without shared memory
+or register tiling.
 :::
 
 ### LLVM

@@ -21,18 +21,13 @@ CUDA toolkit is required. This is the setup + verification runbook for the serve
 sudo apt install nvidia-cuda-toolkit
 nvcc --version   # verify
 
-# 2. Build LLVM/MLIR with the CUDA runner enabled
-#    (produces libmlir_cuda_runtime.so — required by the JIT)
+# 2. Build LLVM/MLIR
 cd ~/llvm-project/build
 cmake .. -DLLVM_ENABLE_PROJECTS="mlir" \
          -DLLVM_TARGETS_TO_BUILD="X86;NVPTX" \
-         -DMLIR_ENABLE_CUDA_RUNNER=ON \
          -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)
 sudo make install   # or point Hexir's CMakeLists at this build dir
-
-# Verify the runtime wrapper exists:
-ls /usr/local/lib/libmlir_cuda_runtime.so
 
 # 3. Build hexir
 cd ~/hexir && mkdir -p build && cd build
@@ -90,6 +85,6 @@ Defaults live in `src/TargetInfo.cpp` (`opPreferred_`); `gpu` ≡ `cuda`.
 | Symptom | Likely cause |
 |---|---|
 | `error: ... gpu-module-to-binary` / "Failed to compile" | ptxas not on PATH → check `which ptxas` |
-| JIT fails with undefined `mgpu*` symbols | `libmlir_cuda_runtime.so` missing → rebuild MLIR with `-DMLIR_ENABLE_CUDA_RUNNER=ON` |
+
 | `CUDA_ERROR_NO_BINARY_FOR_GPU` | chip mismatch → set `nvvmOpts.chip` to your GPU's sm_XX |
 | Wrong numeric results on GPU | report back — likely a missing host↔device transfer (known roadmap item) |

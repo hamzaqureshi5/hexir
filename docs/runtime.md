@@ -105,8 +105,8 @@ hal roundtrip : ok (32 bytes)
 
 A CUDA buffer is `DEVICE_LOCAL`, so `hexir_buffer_host_pointer` returns NULL
 and callers must use write/read. Those two calls **are** the host-to-device and
-device-to-host transfers, which is why the artifact path gets transfers for
-free where the JIT path does not.
+device-to-host transfers, which is why the runtime inherently handles these
+transfers when reading or writing buffers.
 
 ## Placement is checked
 
@@ -165,7 +165,7 @@ with.
 
 ```
 $ tools/hxb-dump.py gpu.hxb --rodata
-version 2, flags 0x0, 4 sections
+version 3, flags 0x0, 4 sections
   symbols      offset=120      size=40
   program      offset=160      size=176
   rodata       offset=336      size=64
@@ -186,7 +186,7 @@ rodata  64 bytes (8 f64)
 
 executables  (1)
   linear_0         matmul cuda    2x2x2  elem=8B
-    device image   3544 bytes, fatbin   launch grid=2 block=2
+    device image   3544 bytes, fatbin   grid=(2,1) block=(2,1)
 ```
 
 `--image <kernel>` writes the device image out, which can then be disassembled:
@@ -211,7 +211,7 @@ hexir-run --selftest
 ```
 
 `--quiet`
-: Print only the program's own output. Useful for diffing against the JIT.
+: Print only the program's own output. Useful for comparing results between devices.
 
 `--selftest`
 : Exercise the HAL — allocate, write, read back — without needing a module.
