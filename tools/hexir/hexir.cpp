@@ -106,26 +106,41 @@ static cl::opt<std::string> inputFilename(cl::Positional,
                                           cl::init("-"),
                                           cl::value_desc("filename"));
 
-using mlir::hexir::Stage;
+using mlir::hexir::Phase;
 
-static cl::opt<Stage> emitAction(
-    "emit", cl::desc("Select the kind of output desired"),
-    cl::values(clEnumValN(Stage::Hexir, "mlir", "output the MLIR dump")),
-    cl::values(clEnumValN(Stage::TIR, "mlir-tir",
-                          "output the MLIR dump after lowering hexir compute "
-                          "ops to hextir prim funcs")),
-    cl::values(clEnumValN(Stage::HXB, "hxb",
-                          "serialize a loadable module for the runtime "
-                          "(see -o)")),
-    cl::values(clEnumValN(Stage::Linalg, "mlir-linalg",
-                          "output the MLIR dump after linalg lowering")),
-    cl::values(clEnumValN(Stage::Hetero, "mlir-hetero",
-                          "output MLIR after CPU/CUDA partitioning")),
-    cl::values(clEnumValN(Stage::GPU, "mlir-gpu",
-                          "output MLIR after lowering CUDA partitions to GPU")),
-    cl::values(clEnumValN(Stage::LLVMDialect, "mlir-llvm",
-                          "output the MLIR dump after llvm lowering")),
-    cl::values(clEnumValN(Stage::LLVMIR, "llvm", "output the LLVM IR dump")));
+// How far to compile. One axis; -emit below is the other.
+static cl::opt<Phase> compileTo(
+    "compile-to", cl::init(Phase::Artifact),
+    cl::desc("How far to compile (default artifact)"),
+    cl::values(
+        clEnumValN(Phase::Input, "input", "the graph as parsed or built"),
+        clEnumValN(Phase::Graph, "graph", "after graph optimization"),
+        clEnumValN(Phase::Place, "place",
+                   "after placement: device attributes on every op"),
+        clEnumValN(Phase::Kernel, "kernel",
+                   "each compute op as a hextir kernel"),
+        clEnumValN(Phase::Artifact, "artifact",
+                   "a loadable module for the runtime; see -o"),
+        clEnumValN(Phase::Linalg, "linalg",
+                   "frozen route: linalg on tensors, carrying placement"),
+        clEnumValN(Phase::LinalgGpu, "linalg-gpu",
+                   "frozen route: cuda-placed linalg ops as gpu.launch"),
+        clEnumValN(Phase::LinalgLLVM, "linalg-llvm",
+                   "frozen route: the LLVM dialect")));
+
+// What to write out. Parsed by hand rather than as a cl::opt<enum> because it
+// also accepts the old stage names, which named a phase and a format at once.
+static cl::opt<std::string>
+    emitFormat("emit", cl::desc("Output format: mlir, llvm or hxb"),
+               cl::value_desc("format"), cl::init(""));
+
+namespace {
+enum class Format { MLIR, LLVMIR, HXB };
+} // namespace
+
+// Resolved from -emit and --compile-to by resolveOutput().
+static Format outputFormat = Format::MLIR;
+static Phase outputPhase = Phase::Artifact;
 
 static cl::opt<bool> enableOpt("opt", cl::desc("Enable optimizations"));
 
@@ -148,7 +163,7 @@ static cl::opt<std::string> gpuChip(
     cl::value_desc("sm_XX"), cl::init("sm_75"));
 
 static cl::opt<std::string>
-    outputFilename("o", cl::desc("Output file for -emit=hxb"),
+    outputFilename("o", cl::desc("Output file for --compile-to=artifact"),
                    cl::value_desc("filename"), cl::init("out.hxb"));
 
 // Override op placement at runtime without recompiling, e.g.:
@@ -158,6 +173,110 @@ static cl::list<std::string> placementOverrides(
     "placement", cl::CommaSeparated, cl::ZeroOrMore,
     cl::desc("Override op placement: <op-name>=<cpu|cuda>[,...]"),
     cl::value_desc("op=device"));
+
+// Resolve -emit and --compile-to into a phase and a format, and reject the
+// pairs that cannot mean anything.
+//
+// The two flags are separate axes on purpose. -emit= used to be both at once,
+// which is how it came to list `mlir-tir` (an IR level) next to `hxb` (a file
+// format) next to `mlir-gpu` (a whole other route through the compiler).
+static llvm::LogicalResult resolveOutput() {
+  const bool haveEmit = emitFormat.getNumOccurrences() > 0;
+  const bool havePhase = compileTo.getNumOccurrences() > 0;
+
+  if (!haveEmit && !havePhase) {
+    llvm::errs() << "error: nothing to do; give --compile-to=<phase>, "
+                    "-emit=<format>, or both\n\n";
+    return llvm::failure();
+  }
+
+  outputPhase = compileTo;
+
+  // A phase with no format asked for: write the obvious thing.
+  if (!haveEmit) {
+    outputFormat =
+        outputPhase == Phase::Artifact ? Format::HXB : Format::MLIR;
+    return llvm::success();
+  }
+
+  llvm::StringRef emit = emitFormat;
+  // The old spellings. Each named a phase and a format together, so each still
+  // sets both -- and says what to use instead, because the phase it maps to is
+  // not always the one the name suggests.
+  struct Legacy {
+    llvm::StringRef name;
+    Phase phase;
+    Format format;
+    llvm::StringRef replacement;
+    llvm::StringRef note;
+  };
+  static const Legacy kLegacy[] = {
+      {"mlir-tir", Phase::Kernel, Format::MLIR, "--compile-to=kernel", ""},
+      {"mlir-linalg", Phase::Linalg, Format::MLIR, "--compile-to=linalg",
+       "which now runs placement first, as -emit=mlir-hetero used to"},
+      {"mlir-hetero", Phase::Linalg, Format::MLIR, "--compile-to=linalg", ""},
+      {"mlir-gpu", Phase::LinalgGpu, Format::MLIR, "--compile-to=linalg-gpu",
+       "a frozen route; it is not what builds the device code in a .hxb"},
+      {"mlir-llvm", Phase::LinalgLLVM, Format::MLIR, "--compile-to=linalg-llvm",
+       ""},
+  };
+
+  for (const Legacy &legacy : kLegacy) {
+    if (emit != legacy.name)
+      continue;
+    llvm::errs() << "warning: -emit=" << legacy.name << " is deprecated; use "
+                 << legacy.replacement;
+    if (!legacy.note.empty())
+      llvm::errs() << " (" << legacy.note << ")";
+    llvm::errs() << "\n";
+    if (havePhase && compileTo != legacy.phase) {
+      llvm::errs() << "error: -emit=" << legacy.name << " and --compile-to "
+                   << "ask for different phases\n\n";
+      return llvm::failure();
+    }
+    outputPhase = legacy.phase;
+    outputFormat = legacy.format;
+    return llvm::success();
+  }
+
+  if (emit == "mlir") {
+    outputFormat = Format::MLIR;
+    // -emit=mlir on its own has always meant the graph as written.
+    if (!havePhase)
+      outputPhase = Phase::Input;
+  } else if (emit == "llvm") {
+    outputFormat = Format::LLVMIR;
+    if (!havePhase)
+      outputPhase = Phase::LinalgLLVM;
+  } else if (emit == "hxb") {
+    outputFormat = Format::HXB;
+    if (!havePhase)
+      outputPhase = Phase::Artifact;
+  } else {
+    llvm::errs() << "error: '" << emit
+                 << "' is not an output format; expected mlir, llvm or hxb\n\n";
+    return llvm::failure();
+  }
+
+  // Legality. Each phase produces one kind of thing, and asking for another
+  // kind is a mistake worth naming rather than silently ignoring.
+  if (outputFormat == Format::HXB && outputPhase != Phase::Artifact) {
+    llvm::errs() << "error: -emit=hxb only makes sense with "
+                    "--compile-to=artifact\n\n";
+    return llvm::failure();
+  }
+  if (outputFormat == Format::MLIR && outputPhase == Phase::Artifact) {
+    llvm::errs() << "error: --compile-to=artifact writes a file, not MLIR; "
+                    "use -emit=hxb, or an earlier phase\n\n";
+    return llvm::failure();
+  }
+  if (outputFormat == Format::LLVMIR && outputPhase != Phase::LinalgLLVM) {
+    llvm::errs() << "error: -emit=llvm needs --compile-to=linalg-llvm; no "
+                    "other phase reaches LLVM IR yet\n\n";
+    return llvm::failure();
+  }
+  return llvm::success();
+}
 
 // What to print when the command line does not make sense.
 //
@@ -174,17 +293,23 @@ static void printUsage() {
 Compiles a program in the hexir dialect. With no input file it compiles the
 program built in C++ by compiler/Support/Builder.cpp.
 
-  -emit=<stage>          what to produce (required to get output)
-       mlir              the graph as written
-       mlir-tir          each compute op as a hextir kernel
-       hxb               a loadable module for the runtime; see -o
-       mlir-linalg       after lowering to linalg on tensors
-       mlir-hetero       placement, as device attributes on linalg ops
-       mlir-gpu          cuda-placed ops as gpu.launch
-       mlir-llvm         the LLVM dialect
-       llvm              translated LLVM IR
+  --compile-to=<phase>   how far to compile (default artifact)
+       input             the graph as written
+       graph             after graph optimization
+       place             after placement, as device attributes
+       kernel            each compute op as a hextir kernel
+       artifact          a loadable module for the runtime; see -o
+     frozen route, kept as a dump until host codegen replaces it:
+       linalg            linalg on tensors, carrying placement
+       linalg-gpu        cuda-placed linalg ops as gpu.launch
+       linalg-llvm       the LLVM dialect
 
-  -o <file>              output path for -emit=hxb (default out.hxb)
+  -emit=<format>         what to write out
+       mlir              textual MLIR (the default for every phase but artifact)
+       llvm              translated LLVM IR (needs --compile-to=linalg-llvm)
+       hxb               the binary module (needs --compile-to=artifact)
+
+  -o <file>              output path for --compile-to=artifact (default out.hxb)
   -target=<device>[:<arch>]
                          device to compile for, and which chip. Repeatable.
                          default: cpu, cuda:sm_75
@@ -193,9 +318,9 @@ program built in C++ by compiler/Support/Builder.cpp.
   -opt                   run LLVM's O3 pipeline
 
 examples:
-  hexir -emit=mlir-tir -placement=hexir.linear=cuda
-  hexir -emit=hxb -o model.hxb -target=cuda:sm_86 -placement=hexir.linear=cuda
-  hexir -emit=mlir-hetero -placement=hexir.linear=cuda,hexir.relu=cpu prog.mlir
+  hexir --compile-to=kernel -placement=hexir.linear=cuda
+  hexir --compile-to=artifact -o model.hxb -target=cuda:sm_86 -placement=hexir.linear=cuda
+  hexir --compile-to=place -placement=hexir.linear=cuda,hexir.relu=cpu prog.mlir
 
 placeable ops:
 )";
@@ -333,7 +458,7 @@ static int loadAndProcessMLIR(mlir::MLIRContext &context,
     return 4;
 
   mlir::hexir::PipelineOptions opts;
-  opts.stage = emitAction;
+  opts.phase = outputPhase;
   opts.enableOpt = enableOpt;
   opts.gpuChip = resolvedGpuChip;
   mlir::hexir::buildHexirPipeline(pm, opts);
@@ -392,10 +517,7 @@ int main(int argc, char **argv) {
 
   cl::ParseCommandLineOptions(argc, argv, "hexir compiler\n");
 
-  // Nothing to do without -emit, and silently doing nothing is unhelpful.
-  if (emitAction.getNumOccurrences() == 0) {
-    llvm::errs() << "error: no -emit=<stage> given, so there is nothing to "
-                    "produce\n\n";
+  if (llvm::failed(resolveOutput())) {
     printUsage();
     return 2;
   }
@@ -468,7 +590,7 @@ int main(int argc, char **argv) {
     return error;
 
   // Serialize a loadable module for the runtime.
-  if (emitAction == Stage::HXB) {
+  if (outputFormat == Format::HXB) {
     std::error_code ec;
     llvm::raw_fd_ostream os(outputFilename, ec, llvm::sys::fs::OF_None);
     if (ec) {
@@ -482,15 +604,15 @@ int main(int argc, char **argv) {
     return 0;
   }
 
-  // If we aren't exporting to non-mlir, then we are done.
-  bool isOutputingMLIR = mlir::hexir::stageEmitsMLIR(emitAction);
-  if (isOutputingMLIR) {
+  // The format decides what comes out; the phase decided what the module
+  // contains by now.
+  if (outputFormat == Format::MLIR) {
     module->dump();
     return 0;
   }
 
   // Check to see if we are compiling to LLVM IR.
-  if (emitAction == Stage::LLVMIR)
+  if (outputFormat == Format::LLVMIR)
     return dumpLLVMIR(*module);
 
   llvm::errs() << "No action specified (parsing only?), use -emit=<action>\n";

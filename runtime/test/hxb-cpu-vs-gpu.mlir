@@ -5,11 +5,11 @@
 // generation and the launch geometry all have to be right for these to agree.
 //
 // REQUIRES: runtime, compiler, cuda
-// RUN: %hexir -emit=hxb -o %t.cpu.hxb %s
+// RUN: %hexir --compile-to=artifact -o %t.cpu.hxb %s
 // Both compute ops go to the GPU: the runtime opens one device and runs the
 // whole program on it, so a module whose kernels are split across devices
 // cannot execute yet. That is a real gap, not a property of this test.
-// RUN: %hexir -emit=hxb -o %t.gpu.hxb -placement=hexir.linear=cuda,hexir.relu=cuda %s
+// RUN: %hexir --compile-to=artifact -o %t.gpu.hxb -placement=hexir.linear=cuda,hexir.relu=cuda %s
 // RUN: %hexir-run --quiet %t.cpu.hxb > %t.cpu.out
 // RUN: %hexir-run --quiet --device=cuda %t.gpu.hxb > %t.gpu.out
 // RUN: diff %t.cpu.out %t.gpu.out

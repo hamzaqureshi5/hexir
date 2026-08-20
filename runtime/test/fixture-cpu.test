@@ -6,7 +6,7 @@
 # the reader fails here immediately, rather than only when someone tries to run
 # an old artifact.
 #
-# Regenerate with:  hexir -emit=hxb -o runtime/test/fixtures/mlp-cpu.hxb
+# Regenerate with:  hexir --compile-to=artifact -o runtime/test/fixtures/mlp-cpu.hxb
 #
 # REQUIRES: runtime
 # RUN: %hexir-run --quiet %S/fixtures/mlp-cpu.hxb | FileCheck %s

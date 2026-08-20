@@ -1,7 +1,7 @@
 // LowerToLLVMPass: full pipeline including GPU kernel compilation.
 // Requires the CUDA toolkit (nvcc/ptxas) to compile the matmul kernel.
 // REQUIRES: cuda
-// RUN: %hexir -emit=mlir-llvm 2>&1 | FileCheck %s
+// RUN: %hexir --compile-to=linalg-llvm 2>&1 | FileCheck %s
 
 // Host side: CUDA runtime calls for matmul launch, CPU loops for relu.
 // CHECK:       llvm.func @printf(!llvm.ptr, ...)

@@ -3,7 +3,7 @@
 // the JIT produces for the same program.
 //
 // REQUIRES: runtime, compiler
-// RUN: %hexir -emit=hxb -o %t.hxb %s
+// RUN: %hexir --compile-to=artifact -o %t.hxb %s
 // RUN: %hexir-run %t.hxb 2>&1 | FileCheck %s
 // RUN: not %hexir-run %t.hxb --entry=nosuchfunc 2>&1 | FileCheck %s --check-prefix=MISSING
 

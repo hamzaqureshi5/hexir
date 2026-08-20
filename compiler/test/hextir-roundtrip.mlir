@@ -5,7 +5,7 @@
 // driver compiles the file when one is given, and falls back to the program
 // built in Builder.cpp when it is not.
 //
-// RUN: %hexir -emit=mlir %s 2>&1 | FileCheck %s
+// RUN: %hexir --compile-to=input %s 2>&1 | FileCheck %s
 
 module {
   func.func @main() {

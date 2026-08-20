@@ -2,8 +2,8 @@
 // hexir.call_tir. Placement picks the loop kinds -- cpu gets "parallel",
 // cuda gets "thread_binding" with a bound axis. Reductions stay "serial".
 //
-// RUN: %hexir -emit=mlir-tir %s 2>&1 | FileCheck %s --check-prefix=CPU
-// RUN: %hexir -emit=mlir-tir -placement=hexir.relu=cuda %s 2>&1 | FileCheck %s --check-prefix=SPLIT
+// RUN: %hexir --compile-to=kernel %s 2>&1 | FileCheck %s --check-prefix=CPU
+// RUN: %hexir --compile-to=kernel -placement=hexir.relu=cuda %s 2>&1 | FileCheck %s --check-prefix=SPLIT
 
 func.func @main() {
   %a = hexir.constant dense<[[3.0, 1.0], [2.0, 2.0]]> : tensor<2x2xf64>

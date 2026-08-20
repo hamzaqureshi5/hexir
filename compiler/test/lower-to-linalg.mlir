@@ -3,7 +3,7 @@
 //
 // hexir.print survives to the LLVM stage, so it is still here.
 //
-// RUN: %hexir -emit=mlir-linalg %s 2>&1 | FileCheck %s
+// RUN: %hexir --compile-to=linalg %s 2>&1 | FileCheck %s
 
 func.func @main() {
   %a = hexir.constant dense<[[3.0, 1.0], [2.0, 2.0]]> : tensor<2x2xf64>
@@ -21,8 +21,8 @@ func.func @main() {
 // constant is read-only, so bufferization would have to copy it to make the
 // destination writable.
 // CHECK:         %[[EMPTY:.*]] = tensor.empty()
-// CHECK:         %[[INIT:.*]] = linalg.fill ins(%{{.*}} : f64) outs(%[[EMPTY]] : tensor<2x2xf64>)
-// CHECK:         %[[MATMUL:.*]] = linalg.matmul ins(%{{.*}}, %{{.*}} : tensor<2x2xf64>, tensor<2x2xf64>) outs(%[[INIT]]
+// CHECK:         %[[INIT:.*]] = linalg.fill {{.*}} ins(%{{.*}} : f64) outs(%[[EMPTY]] : tensor<2x2xf64>)
+// CHECK:         %[[MATMUL:.*]] = linalg.matmul {{.*}} ins(%{{.*}}, %{{.*}} : tensor<2x2xf64>, tensor<2x2xf64>) outs(%[[INIT]]
 
 // CHECK:         linalg.generic
 // CHECK-SAME:      ins(%[[MATMUL]] : tensor<2x2xf64>)

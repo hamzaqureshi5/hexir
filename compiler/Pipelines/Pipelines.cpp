@@ -3,6 +3,10 @@
 // Single source of truth for pass ordering. Everything here only *adds* passes
 // -- the driver runs the PassManager once, after this returns.
 //
+// One function per phase, so this file stays readable as passes accumulate.
+// The phase graph, and which gating is legitimate where, is documented on
+// `Phase` in include/hexir/Pipelines/Pipelines.h.
+//
 //===----------------------------------------------------------------------===//
 
 #include "hexir/Pipelines/Pipelines.h"
@@ -26,74 +30,76 @@
 
 using namespace mlir;
 
-bool mlir::hexir::stageEmitsMLIR(Stage stage) {
-  return stage <= Stage::LLVMDialect;
+bool mlir::hexir::isLinalgRoute(Phase phase) {
+  return phase == Phase::Linalg || phase == Phase::LinalgGpu ||
+         phase == Phase::LinalgLLVM;
 }
 
-void mlir::hexir::buildHexirPipeline(PassManager &pm,
-                                     const PipelineOptions &opts) {
-  const Stage stage = opts.stage;
+namespace {
 
-  const bool loweringToLinalg = stage >= Stage::Linalg;
-  const bool partitioningForHetero = stage >= Stage::Hetero;
-  // GPU lowering runs for every stage at or beyond mlir-gpu (incl. llvm/jit).
-  const bool loweringCudaToGpu = stage >= Stage::GPU;
-  const bool loweringToLLVM = stage >= Stage::LLVMDialect;
+//===----------------------------------------------------------------------===//
+// graph -- hexir to hexir
+//===----------------------------------------------------------------------===//
+/// Graph-level cleanup, and where graph optimization will go: folding,
+/// const-eval and the fusion decision all belong here, on whole tensors,
+/// before placement.
+///
+/// Nested on hexir::FuncOp, which nothing currently builds -- every program is
+/// a func.func, so these passes match no operation and do nothing. That bug is
+/// milestone M0 in docs/optimizations/plan.md; it is left alone here so this
+/// restructuring does not change any output.
+void buildGraphPipeline(PassManager &pm) {
+  OpPassManager &optPM = pm.nest<mlir::hexir::FuncOp>();
+  optPM.addPass(createCanonicalizerPass());
+  optPM.addPass(mlir::hexir::createShapeInferencePass());
+  optPM.addPass(createCanonicalizerPass());
+  optPM.addPass(createCSEPass());
+}
 
-  //===--------------------------------------------------------------------===//
-  // Graph-level cleanup
-  //===--------------------------------------------------------------------===//
-  const bool kernelLevel = stage == Stage::TIR || stage == Stage::HXB;
+//===----------------------------------------------------------------------===//
+// kernel -- hexir to hextir (route A)
+//===----------------------------------------------------------------------===//
+/// Each hexir.linear/add/relu becomes a hextir.prim_func at module scope plus a
+/// hexir.call_tir at the use site. Placement already decided in `place` picks
+/// the loop kinds.
+///
+/// `artifact` stops here too: ModuleSerializer builds the command list from
+/// kernel-level IR, and compiles device code on a clone so this module stays at
+/// this level.
+void buildKernelPipeline(PassManager &pm) {
+  pm.addPass(mlir::hexir::createLowerToTIRPass());
+}
 
-  if (opts.enableOpt || loweringToLinalg || kernelLevel) {
-    // Nested on hexir::FuncOp, which only exists if hexir.func ops were built.
-    OpPassManager &optPM = pm.nest<mlir::hexir::FuncOp>();
-    optPM.addPass(createCanonicalizerPass());
-    optPM.addPass(mlir::hexir::createShapeInferencePass());
-    optPM.addPass(createCanonicalizerPass());
-    optPM.addPass(createCSEPass());
-  }
+//===----------------------------------------------------------------------===//
+// linalg, linalg-gpu, linalg-llvm -- route B, frozen
+//===----------------------------------------------------------------------===//
+/// hexir -> linalg -> bufferize -> loops -> LLVM, with cuda-placed linalg ops
+/// going through gpu.launch on the way.
+///
+/// Nothing executes this route: it lost its only consumer when the JIT was
+/// removed, so all three phases terminate in a dump. It also bypasses the
+/// kernel level, which means no scheduling work applies to it. Frozen until
+/// host code generation from hextir replaces it -- see
+/// docs/optimizations/plan.md.
+void buildLinalgRoutePipeline(PassManager &pm,
+                              const mlir::hexir::PipelineOptions &opts) {
+  const mlir::hexir::Phase phase = opts.phase;
+  // Within this route the phases really are ordered, so `>=` is honest here.
+  const bool loweringCudaToGpu = phase >= mlir::hexir::Phase::LinalgGpu;
+  const bool loweringToLLVM = phase >= mlir::hexir::Phase::LinalgLLVM;
 
-  //===--------------------------------------------------------------------===//
-  // Kernel level (branch)
-  //===--------------------------------------------------------------------===//
-  // Partition first so every compute op carries a `device`, then turn each one
-  // into a hextir.prim_func. Terminal: nothing lowers hextir further yet, so
-  // this does not fall through to the linalg pipeline below.
-  // -emit=hxb serializes from exactly this level, so it shares the pipeline.
-  if (kernelLevel) {
-    pm.addPass(mlir::hexir::createPartitionPass());
-    pm.addPass(mlir::hexir::createLowerToTIRPass());
-    return;
-  }
-
-  if (!loweringToLinalg)
-    return;
-
-  //===--------------------------------------------------------------------===//
-  // Placement, then hexir -> linalg
-  //===--------------------------------------------------------------------===//
-  // Placement is decided on the frontend hexir ops (hexir.linear, hexir.relu,
-  // ...) BEFORE lowering; HexirToLinalg propagates the device attr onto the
-  // linalg ops it creates.
-  if (partitioningForHetero)
-    pm.addPass(mlir::hexir::createPartitionPass());
-
+  // HexirToLinalg propagates the `device` attr onto the linalg ops it creates.
   pm.addPass(mlir::hexir::createLowerToLinalgPass());
-  if (stage == Stage::Linalg)
-    return;
 
-  if (partitioningForHetero) {
-    // Second run: fallback for linalg ops that did not inherit a device attr
-    // (PartitionPass skips ops already annotated).
-    pm.addPass(mlir::hexir::createPartitionPass());
-  }
-  // -emit=mlir-hetero stops here and prints linalg carrying `device`. There
-  // used to be a detour through mirror ls_cpu/ls_gpu ops purely to show
+  // Second run: fallback for linalg ops that did not inherit a device attr
+  // (PartitionPass skips ops already annotated).
+  pm.addPass(mlir::hexir::createPartitionPass());
+
+  // A detour through mirror ls_cpu/ls_gpu ops used to exist purely to show
   // placement in the op name; it was a lossy round trip -- rebuilding each op
   // dropped its outs operand and every attribute but `device` -- and printing
   // the real linalg op says strictly more.
-  if (stage == Stage::Hetero)
+  if (phase == mlir::hexir::Phase::Linalg)
     return;
 
   //===--------------------------------------------------------------------===//
@@ -120,7 +126,7 @@ void mlir::hexir::buildHexirPipeline(PassManager &pm,
 
   if (loweringCudaToGpu)
     pm.addPass(mlir::hexir::createCudaGpuLoweringPass());
-  if (stage == Stage::GPU)
+  if (phase == mlir::hexir::Phase::LinalgGpu)
     return;
 
   //===--------------------------------------------------------------------===//
@@ -190,4 +196,40 @@ void mlir::hexir::buildHexirPipeline(PassManager &pm,
     pm.addPass(createReconcileUnrealizedCastsPass());
     pm.addPass(LLVM::createDIScopeForLLVMFuncOpPass());
   }
+}
+
+} // namespace
+
+void mlir::hexir::buildHexirPipeline(PassManager &pm,
+                                     const PipelineOptions &opts) {
+  const Phase phase = opts.phase;
+
+  // `input` is the graph as it arrived, so it runs nothing -- unless -opt was
+  // asked for, which is the one case where a plain dump is expected to have
+  // been cleaned up.
+  if (phase != Phase::Input || opts.enableOpt)
+    buildGraphPipeline(pm);
+  if (phase == Phase::Input || phase == Phase::Graph)
+    return;
+
+  //===--------------------------------------------------------------------===//
+  // place
+  //===--------------------------------------------------------------------===//
+  // Placement is decided on the frontend hexir ops (hexir.linear, hexir.relu,
+  // ...) BEFORE any lowering, and every later phase reads the attribute it
+  // leaves behind. It is not optional: a dump without it would show something
+  // the compiler never actually works with.
+  pm.addPass(mlir::hexir::createPartitionPass());
+  if (phase == Phase::Place)
+    return;
+
+  //===--------------------------------------------------------------------===//
+  // the fork
+  //===--------------------------------------------------------------------===//
+  if (isLinalgRoute(phase)) {
+    buildLinalgRoutePipeline(pm, opts);
+    return;
+  }
+
+  buildKernelPipeline(pm);
 }

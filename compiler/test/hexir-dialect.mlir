@@ -1,7 +1,7 @@
-// The hexir dialect parses and prints. -emit=mlir runs no passes, so what
+// The hexir dialect parses and prints. --compile-to=input runs no passes, so what
 // comes back out is exactly what went in, modulo SSA renumbering.
 //
-// RUN: %hexir -emit=mlir %s 2>&1 | FileCheck %s
+// RUN: %hexir --compile-to=input %s 2>&1 | FileCheck %s
 
 func.func @main() {
   %a = hexir.constant dense<[[3.0, 1.0], [2.0, 2.0]]> : tensor<2x2xf64>

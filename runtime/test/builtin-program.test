@@ -4,7 +4,7 @@
 # no-input path -- worth keeping, because that is what a bare `hexir` run does.
 #
 # REQUIRES: runtime, compiler
-# RUN: %hexir -emit=hxb -o %t.hxb
+# RUN: %hexir --compile-to=artifact -o %t.hxb
 # RUN: %hexir-run --quiet %t.hxb | FileCheck %s
 
 # [[3,1],[2,2]] x [[1,5],[5,2]]

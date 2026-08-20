@@ -5,7 +5,7 @@
 // This only checks the IR, so it needs no CUDA toolkit. Compiling the kernel
 // to CUBIN does, and that is covered by the cuda-gated tests instead.
 //
-// RUN: %hexir -emit=mlir-gpu -placement=hexir.linear=cuda %s 2>&1 | FileCheck %s
+// RUN: %hexir --compile-to=linalg-gpu -placement=hexir.linear=cuda %s 2>&1 | FileCheck %s
 
 func.func @main() {
   %a = hexir.constant dense<[[3.0, 1.0], [2.0, 2.0]]> : tensor<2x2xf64>

@@ -6,7 +6,11 @@
 // the op *name*; printing the actual op says more, and the round trip through
 // the mirror dialects was lossy.
 //
-// RUN: %hexir -emit=mlir-hetero -placement=hexir.linear=cuda %s 2>&1 | FileCheck %s
+// RUN: %hexir --compile-to=linalg -placement=hexir.linear=cuda %s 2>&1 | FileCheck %s
+//
+// Placement is decided one phase earlier, on the hexir ops themselves, and
+// that phase can now be printed on its own.
+// RUN: %hexir --compile-to=place -placement=hexir.linear=cuda %s 2>&1 | FileCheck %s --check-prefix=PLACE
 
 func.func @main() {
   %a = hexir.constant dense<[[3.0, 1.0], [2.0, 2.0]]> : tensor<2x2xf64>
@@ -34,3 +38,8 @@ func.func @main() {
 // Nothing survives that should have been lowered.
 // CHECK-NOT:     hexir.linear
 // CHECK-NOT:     hexir.relu
+
+// PLACE:      module attributes {hexir.targets = ["cpu", "cuda"]}
+// PLACE:        hexir.linear %{{.*}} {device = "cuda"}
+// PLACE:        hexir.relu %{{.*}} {device = "cpu"}
+// PLACE-NOT:    linalg

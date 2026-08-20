@@ -5,8 +5,8 @@
 // same answer, a different device, and no compiler in the process.
 //
 // REQUIRES: runtime, compiler, cuda
-// RUN: %hexir -emit=hxb -o %t.gpu.hxb -placement=hexir.linear=cuda %s
-// RUN: %hexir -emit=hxb -o %t.cpu.hxb %s
+// RUN: %hexir --compile-to=artifact -o %t.gpu.hxb -placement=hexir.linear=cuda %s
+// RUN: %hexir --compile-to=artifact -o %t.cpu.hxb %s
 // RUN: %hexir-run --quiet --device=cuda %t.gpu.hxb > %t.gpu.out
 // RUN: %hexir-run --quiet %t.cpu.hxb > %t.cpu.out
 // RUN: diff %t.cpu.out %t.gpu.out
