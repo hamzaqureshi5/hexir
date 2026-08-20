@@ -50,6 +50,7 @@ enum class Phase {
   // Route A: the kernel level, and the only route that produces something
   // runnable.
   Kernel,   // hextir.prim_func per compute op, called via hexir.call_tir
+  Device,   // cuda kernels as gpu.module, lowered to NVVM
   Artifact, // the .hxb container, written by ModuleSerializer
 
   // Route B, frozen.
@@ -75,6 +76,25 @@ struct PipelineOptions {
 /// Add every pass needed to reach `opts.phase`, and nothing past it, so the
 /// caller runs the PassManager exactly once.
 void buildHexirPipeline(PassManager &pm, const PipelineOptions &opts);
+
+/// The device path, in two halves because ModuleSerializer has to look at the
+/// IR in between: gpu-module-to-binary erases the gpu.module it compiles, so
+/// the launch geometry has to be read off it first.
+///
+/// Both halves are here rather than in the serializer so that
+/// `--compile-to=device` and the artifact compile the same thing. A second
+/// copy of this pass list would be a third GPU path, which is the problem
+/// these phases exist to remove.
+
+/// hextir -> gpu.module holding a gpu.func, plus scf -> cf for whatever loops
+/// were not bound to hardware indices.
+void buildDeviceLoweringPipeline(PassManager &pm, const PipelineOptions &opts);
+
+/// gpu.module -> NVVM, bare-pointer calling convention, and optionally on to a
+/// binary. `emitBinary` needs ptxas; without it this stops at NVVM, which is
+/// what the device phase prints and what ptxas is handed.
+void buildDeviceCodegenPipeline(PassManager &pm, const PipelineOptions &opts,
+                                bool emitBinary);
 
 } // namespace hexir
 } // namespace mlir

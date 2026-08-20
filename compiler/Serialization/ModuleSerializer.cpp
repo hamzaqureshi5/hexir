@@ -20,15 +20,10 @@
 #include "hexir_runtime/module.h"
 #include "hexir_runtime/program.h"
 
-#include "hexir/Conversion/Passes.h"
-#include "hexir/Target/CudaToolkit.h"
+#include "hexir/Pipelines/Pipelines.h"
 
-#include "mlir/Conversion/GPUToNVVM/GPUToNVVMPass.h"
-#include "mlir/Conversion/ReconcileUnrealizedCasts/ReconcileUnrealizedCasts.h"
-#include "mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
-#include "mlir/Dialect/GPU/Transforms/Passes.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -116,10 +111,9 @@ struct Serializer {
   /// level, because that is what the command list is built from. The clone is
   /// lowered hextir -> gpu -> NVVM -> CUBIN and only the blobs come back.
   ///
-  /// Bare-pointer calling convention on purpose: without it every memref
-  /// argument expands into seven scalars and the runtime would have to build
-  /// MLIR's descriptor layout by hand. With it a kernel argument is one device
-  /// pointer.
+  /// The pass list lives in compiler/Pipelines, shared with
+  /// `--compile-to=device`, so what gets compiled here is exactly what that
+  /// phase prints.
   // grid.x, grid.y, block.x, block.y for each kernel.
   struct Geometry {
     uint32_t grid_x = 1, grid_y = 1, block_x = 1, block_y = 1;
@@ -140,12 +134,12 @@ struct Serializer {
 
     // Two runs on purpose. gpu-module-to-binary erases the gpu.module it
     // compiles, so the launch geometry has to be read off it in between.
+    mlir::hexir::PipelineOptions opts;
+    opts.gpuChip = gpuChip;
+
     {
       PassManager pm(module.getContext());
-      pm.addPass(mlir::hexir::createHexTIRToGPUPass());
-      // The kernel still has scf.for for any unbound axis (the reduction of a
-      // matmul), and it has to be flat before it can become LLVM IR.
-      pm.addPass(createSCFToControlFlowPass());
+      mlir::hexir::buildDeviceLoweringPipeline(pm, opts);
       if (failed(pm.run(*clone))) {
         module.emitWarning("could not lower cuda kernels to the gpu dialect; "
                            "the module will carry descriptors only");
@@ -170,29 +164,7 @@ struct Serializer {
 
     {
       PassManager pm(module.getContext());
-      GpuNVVMAttachTargetOptions nvvmOpts;
-      nvvmOpts.chip = gpuChip;
-      nvvmOpts.features = "+ptx80";
-      nvvmOpts.optLevel = 3;
-      pm.addPass(createGpuNVVMAttachTarget(nvvmOpts));
-
-      // Bare-pointer calling convention on purpose: without it every memref
-      // argument expands into seven scalars and the runtime would have to
-      // build MLIR's descriptor layout by hand. With it a kernel argument is
-      // one device pointer.
-      ConvertGpuOpsToNVVMOpsOptions nvvmConv;
-      nvvmConv.useBarePtrCallConv = true;
-      pm.nest<gpu::GPUModuleOp>().addPass(
-          createConvertGpuOpsToNVVMOps(nvvmConv));
-      // A partial conversion: without this the leftover casts make the
-      // translation to LLVM IR fail.
-      pm.nest<gpu::GPUModuleOp>().addPass(createReconcileUnrealizedCastsPass());
-      GpuModuleToBinaryPassOptions binaryOpts;
-      // Ubuntu does not lay the toolkit out the way MLIR expects; see
-      // compiler/Target/CudaToolkit.cpp.
-      binaryOpts.toolkitPath = mlir::hexir::resolveCudaToolkitPath();
-      pm.addPass(createGpuModuleToBinaryPass(binaryOpts));
-
+      mlir::hexir::buildDeviceCodegenPipeline(pm, opts, /*emitBinary=*/true);
       if (failed(pm.run(*clone))) {
         module.emitWarning("could not compile cuda kernels to device code; the "
                            "module will carry descriptors only");

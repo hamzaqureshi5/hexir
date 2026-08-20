@@ -119,6 +119,8 @@ static cl::opt<Phase> compileTo(
                    "after placement: device attributes on every op"),
         clEnumValN(Phase::Kernel, "kernel",
                    "each compute op as a hextir kernel"),
+        clEnumValN(Phase::Device, "device",
+                   "cuda kernels as gpu.module, lowered to NVVM"),
         clEnumValN(Phase::Artifact, "artifact",
                    "a loadable module for the runtime; see -o"),
         clEnumValN(Phase::Linalg, "linalg",
@@ -298,6 +300,7 @@ program built in C++ by compiler/Support/Builder.cpp.
        graph             after graph optimization
        place             after placement, as device attributes
        kernel            each compute op as a hextir kernel
+       device            cuda kernels as gpu.module, lowered to NVVM
        artifact          a loadable module for the runtime; see -o
      frozen route, kept as a dump until host codegen replaces it:
        linalg            linalg on tensors, carrying placement

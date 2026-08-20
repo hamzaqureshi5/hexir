@@ -200,6 +200,49 @@ void buildLinalgRoutePipeline(PassManager &pm,
 
 } // namespace
 
+//===----------------------------------------------------------------------===//
+// device -- hextir to gpu.module to NVVM (route A)
+//===----------------------------------------------------------------------===//
+void mlir::hexir::buildDeviceLoweringPipeline(PassManager &pm,
+                                              const PipelineOptions &opts) {
+  (void)opts;
+  pm.addPass(mlir::hexir::createHexTIRToGPUPass());
+  // A thread_binding loop became a hardware index, but any unbound axis -- the
+  // reduction of a matmul -- is still an scf.for, and it has to be flat before
+  // it can become LLVM IR.
+  pm.addPass(createSCFToControlFlowPass());
+}
+
+void mlir::hexir::buildDeviceCodegenPipeline(PassManager &pm,
+                                             const PipelineOptions &opts,
+                                             bool emitBinary) {
+  GpuNVVMAttachTargetOptions nvvmOpts;
+  nvvmOpts.chip = opts.gpuChip;
+  nvvmOpts.features = opts.gpuFeatures;
+  nvvmOpts.optLevel = opts.gpuOptLevel;
+  pm.addPass(createGpuNVVMAttachTarget(nvvmOpts));
+
+  // Bare-pointer calling convention on purpose: without it every memref
+  // argument expands into seven scalars and the runtime would have to build
+  // MLIR's descriptor layout by hand. With it a kernel argument is one device
+  // pointer.
+  ConvertGpuOpsToNVVMOpsOptions nvvmConv;
+  nvvmConv.useBarePtrCallConv = true;
+  pm.nest<gpu::GPUModuleOp>().addPass(createConvertGpuOpsToNVVMOps(nvvmConv));
+  // A partial conversion: without this the leftover casts make the translation
+  // to LLVM IR fail.
+  pm.nest<gpu::GPUModuleOp>().addPass(createReconcileUnrealizedCastsPass());
+
+  if (!emitBinary)
+    return;
+
+  GpuModuleToBinaryPassOptions binaryOpts;
+  // Ubuntu does not lay the toolkit out the way MLIR expects; see
+  // compiler/Target/CudaToolkit.cpp.
+  binaryOpts.toolkitPath = mlir::hexir::resolveCudaToolkitPath();
+  pm.addPass(createGpuModuleToBinaryPass(binaryOpts));
+}
+
 void mlir::hexir::buildHexirPipeline(PassManager &pm,
                                      const PipelineOptions &opts) {
   const Phase phase = opts.phase;
@@ -232,4 +275,21 @@ void mlir::hexir::buildHexirPipeline(PassManager &pm,
   }
 
   buildKernelPipeline(pm);
+  if (phase == Phase::Kernel || phase == Phase::Artifact)
+    return;
+
+  //===--------------------------------------------------------------------===//
+  // device
+  //===--------------------------------------------------------------------===//
+  // Stops at NVVM rather than going on to a binary, for two reasons: it is the
+  // IR ptxas is actually handed, and it means the device path can be inspected
+  // on a machine with no CUDA toolkit installed.
+  //
+  // `artifact` returned above instead of coming through here. It has to: the
+  // command list is built from kernel-level IR, so the serializer compiles
+  // device code on a clone and leaves this module alone.
+  if (phase == Phase::Device) {
+    buildDeviceLoweringPipeline(pm, opts);
+    buildDeviceCodegenPipeline(pm, opts, /*emitBinary=*/false);
+  }
 }
