@@ -28,9 +28,6 @@ std::unique_ptr<Pass> createLowerToTIRPass();
 /// hextir kernel compilable to a CUBIN.
 std::unique_ptr<Pass> createHexTIRToGPUPass();
 
-/// hexir -> affine. Built but not wired into any pipeline.
-std::unique_ptr<Pass> createLowerToAffinePass();
-
 /// Remaining hexir ops (and hexir.print) -> LLVM dialect.
 std::unique_ptr<Pass> createLowerToLLVMPass();
 

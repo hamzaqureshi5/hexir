@@ -21,7 +21,6 @@
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
 
-#include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/Extensions/AllExtensions.h"
@@ -44,7 +43,6 @@
 #include "mlir/Dialect/Linalg/Transforms/BufferizableOpInterfaceImpl.h"
 #include "mlir/Dialect/Tensor/Transforms/BufferizableOpInterfaceImpl.h"
 
-#include "mlir/Dialect/Affine/Transforms/Passes.h"
 #include "mlir/Dialect/Arith/Transforms/Passes.h"
 #include "mlir/Dialect/Bufferization/Transforms/Passes.h"
 #include "mlir/Dialect/Func/Transforms/FuncConversions.h"
@@ -52,7 +50,6 @@
 #include "mlir/Dialect/SCF/Transforms/Passes.h"
 #include "mlir/Transforms/Passes.h"
 
-#include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
 #include "mlir/Conversion/ArithToLLVM/ArithToLLVM.h"
 #include "mlir/Conversion/ControlFlowToLLVM/ControlFlowToLLVM.h"
 #include "mlir/Conversion/FuncToLLVM/ConvertFuncToLLVMPass.h"
@@ -109,17 +106,6 @@ static cl::opt<std::string> inputFilename(cl::Positional,
                                           cl::init("-"),
                                           cl::value_desc("filename"));
 
-namespace {
-enum InputType { HEXIR, MLIR };
-} // namespace
-static cl::opt<enum InputType>
-    inputType("x", cl::init(HEXIR),
-              cl::desc("Decided the kind of output desired"),
-              cl::values(clEnumValN(HEXIR, "hexir",
-                                    "load the input file as a hexir source.")),
-              cl::values(clEnumValN(MLIR, "mlir",
-                                    "load the input file as an MLIR file")));
-
 using mlir::hexir::Stage;
 
 static cl::opt<Stage> emitAction(
@@ -131,8 +117,6 @@ static cl::opt<Stage> emitAction(
     cl::values(clEnumValN(Stage::HXB, "hxb",
                           "serialize a loadable module for the runtime "
                           "(see -o)")),
-    cl::values(clEnumValN(Stage::Affine, "mlir-affine",
-                          "output the MLIR dump after affine lowering")),
     cl::values(clEnumValN(Stage::Linalg, "mlir-linalg",
                           "output the MLIR dump after linalg lowering")),
     cl::values(clEnumValN(Stage::Hetero, "mlir-hetero",
@@ -359,20 +343,6 @@ static int loadAndProcessMLIR(mlir::MLIRContext &context,
   return 0;
 }
 
-static int dumpAST() {
-  if (inputType == InputType::MLIR) {
-    llvm::errs() << "Can't dump a hexir AST when the input is MLIR\n";
-    return 5;
-  }
-
-  // auto moduleAST = parseInputFile(inputFilename);
-  //  if (!moduleAST)
-  //    return 1;
-
-  // dump(*moduleAST);
-  return 0;
-}
-
 static int dumpLLVMIR(mlir::ModuleOp module) {
 
   // Convert the module to LLVM IR in a new LLVM IR context.
@@ -442,16 +412,13 @@ int main(int argc, char **argv) {
     return 2;
   }
 
-  if (emitAction == Stage::AST)
-    return dumpAST();
-
-  // If we aren't dumping the AST, then we are compiling with/to MLIR.
+  // Everything from here on is MLIR.
   mlir::DialectRegistry registry;
   registry.insert<mlir::func::FuncDialect, mlir::arith::ArithDialect,
                   mlir::tensor::TensorDialect, mlir::linalg::LinalgDialect,
                   mlir::gpu::GPUDialect, mlir::NVVM::NVVMDialect,
                   mlir::scf::SCFDialect, mlir::memref::MemRefDialect,
-                  mlir::affine::AffineDialect, mlir::math::MathDialect,
+                  mlir::math::MathDialect,
                   mlir::LLVM::LLVMDialect, mlir::cf::ControlFlowDialect,
                   mlir::bufferization::BufferizationDialect,
                   mlir::hextir::HexTIRDialect>();

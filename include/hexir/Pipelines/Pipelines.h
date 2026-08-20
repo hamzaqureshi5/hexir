@@ -21,11 +21,9 @@ namespace hexir {
 /// `Linalg` on purpose: it is a branch off the pipeline, not a step along it.
 enum class Stage {
   None,
-  AST,          // -emit=ast          (stub)
   Hexir,        // -emit=mlir
   TIR,          // -emit=mlir-tir     terminal; nothing lowers hextir further
   HXB,          // -emit=hxb          serialize the TIR-level module to a file
-  Affine,       // -emit=mlir-affine  (no affine pass is wired up)
   Linalg,       // -emit=mlir-linalg
   Hetero,       // -emit=mlir-hetero
   GPU,          // -emit=mlir-gpu
