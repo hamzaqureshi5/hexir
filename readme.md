@@ -148,33 +148,6 @@ lit runtime/test --param build_dir=$PWD/build-runtime
 That is what CI runs. The compiler is not covered yet: it needs an unreleased
 LLVM, so no packaged MLIR can build it.
 
-## Layout
-
-```
-compiler/    Dialect/<Name>/{IR,Transforms}   dialects and their own passes
-             Conversion/<A>To<B>/             one directory per lowering
-             Pipelines/ Serialization/        pass order, the .hxb writer
-runtime/     include/ src/hal/ src/vm/        standalone C, no MLIR or LLVM
-tools/       hexir/  hxb-dump.py              the driver, and a module inspector
-docs/        Sphinx sources
-```
-
-## Status
-
-Research software. Some of it is finished, some is scaffolding, and the docs
-say which rather than leaving you to find out.
-
-| Works | Partly | Not yet |
-| --- | --- | --- |
-| CPU and GPU, end to end | GPU kernels have no tiling yet | Multi-device modules in one run |
-| Per-operation placement | CPU kernels in `.hxb` are descriptions, not code | f32; memory planning |
-| `.hxb` artifacts, CPU and GPU | | More operations and a frontend |
-
-Benchmarks live in `bench/`. On a GTX 1660 Ti a matmul currently runs about
-2.6x slower than cuBLAS in f64, verified against a CPU reference. The kernel
-has no shared-memory tiling yet, and the whole dialect is f64 on a card whose
-f64 rate is 1/32 of its f32 rate, so there is a lot of headroom in both.
-
 ## Contributing
 
 Fork, branch, keep `make check-hexir` green, open a pull request. New tests
