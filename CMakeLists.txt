@@ -5,16 +5,59 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED YES)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Point these at your LLVM/MLIR build, or pass -DLLVM_DIR=... -DMLIR_DIR=...
+# Which LLVM to build against, in order of preference:
+#
+#   1. -DLLVM_DIR=... -DMLIR_DIR=... on the command line
+#   2. the pinned submodule, once scripts/build-llvm.sh has built it
+#   3. a machine-wide checkout, which is where this project started
+#
+# The submodule exists because "which LLVM?" is not a detail here: hexir uses
+# the new-style OpTy::create(builder, ...) builders, which are in no release, so
+# no packaged MLIR can build it. third_party/llvm-project pins the exact commit
+# it is known to work with. See third_party/README.md.
+set(HEXIR_LLVM_SUBMODULE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/llvm-project/build")
 if(NOT DEFINED LLVM_DIR)
-  set(LLVM_DIR "/home/user/llvm-project/build/lib/cmake/llvm")
+  if(EXISTS "${HEXIR_LLVM_SUBMODULE}/lib/cmake/llvm/LLVMConfig.cmake")
+    set(LLVM_DIR "${HEXIR_LLVM_SUBMODULE}/lib/cmake/llvm")
+  else()
+    set(LLVM_DIR "/home/user/llvm-project/build/lib/cmake/llvm")
+  endif()
 endif()
 if(NOT DEFINED MLIR_DIR)
-  set(MLIR_DIR "/home/user/llvm-project/build/lib/cmake/mlir")
+  if(EXISTS "${HEXIR_LLVM_SUBMODULE}/lib/cmake/mlir/MLIRConfig.cmake")
+    set(MLIR_DIR "${HEXIR_LLVM_SUBMODULE}/lib/cmake/mlir")
+  else()
+    set(MLIR_DIR "/home/user/llvm-project/build/lib/cmake/mlir")
+  endif()
 endif()
 
 find_package(LLVM REQUIRED CONFIG)
 find_package(MLIR REQUIRED CONFIG)
+
+# Say which one was picked. Pointing LLVM_DIR at a directory with no config in
+# it does not fail -- CMake quietly searches its default prefixes instead, and
+# this machine has an installed LLVM in /usr/local as well as two build trees.
+# So the config file is what gets tested above, and the choice gets printed.
+message(STATUS "hexir: LLVM ${LLVM_PACKAGE_VERSION} from ${LLVM_DIR}")
+
+# The major version the pinned commit carries. A mismatch is worth naming here,
+# because the symptom otherwise is pages of template errors from a builder
+# signature that changed.
+set(HEXIR_LLVM_REQUIRED_MAJOR 24)
+if(LLVM_VERSION_MAJOR LESS HEXIR_LLVM_REQUIRED_MAJOR)
+  message(FATAL_ERROR
+    "hexir needs LLVM ${HEXIR_LLVM_REQUIRED_MAJOR} or newer, found "
+    "${LLVM_PACKAGE_VERSION} at ${LLVM_DIR}.\n"
+    "The new-style OpTy::create(builder, ...) builders are not in any release, "
+    "so a packaged MLIR cannot build this. Build the pinned commit:\n"
+    "    git submodule update --init third_party/llvm-project\n"
+    "    scripts/build-llvm.sh")
+elseif(LLVM_VERSION_MAJOR GREATER HEXIR_LLVM_REQUIRED_MAJOR)
+  message(WARNING
+    "hexir is pinned to LLVM ${HEXIR_LLVM_REQUIRED_MAJOR} but found "
+    "${LLVM_PACKAGE_VERSION}. Probably fine; MLIR does break APIs between "
+    "majors, so if this fails to build, that is why.")
+endif()
 
 list(APPEND CMAKE_MODULE_PATH "${MLIR_CMAKE_DIR}")
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")

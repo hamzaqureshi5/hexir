@@ -2,16 +2,31 @@
 
 ## Build
 
-Hexir needs a build of LLVM with MLIR. Point CMake at it:
+Hexir needs an **unreleased** LLVM — it uses the new-style
+`OpTy::create(builder, ...)` MLIR builders, so no packaged MLIR will do. The
+commit it works with is pinned as a submodule, and one script builds it:
 
 ```bash
-git clone git@github.com:hamzaqureshi5/hexir.git && cd hexir
-mkdir -p build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release \
-         -DLLVM_DIR=/path/to/llvm-project/build/lib/cmake/llvm \
-         -DMLIR_DIR=/path/to/llvm-project/build/lib/cmake/mlir
-make -j$(nproc)
+git clone --recurse-submodules git@github.com:hamzaqureshi5/hexir.git && cd hexir
+scripts/build-llvm.sh                 # 30-90 min, ~10 GB, once
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+ninja -C build
 ```
+
+The script turns on the CUDA pieces only when `nvcc` is on PATH, so this works
+on a machine with no GPU; the CPU path is complete either way.
+
+If you already have an LLVM 24 build with MLIR, point at it and skip the
+submodule entirely:
+
+```bash
+cmake -S . -B build -DLLVM_DIR=/path/to/llvm/lib/cmake/llvm \
+                    -DMLIR_DIR=/path/to/llvm/lib/cmake/mlir
+```
+
+The configure prints which LLVM it picked. That matters more than it sounds:
+pointing `LLVM_DIR` at a directory with no config in it does not fail, it makes
+CMake search its default prefixes instead.
 
 This produces two programs:
 

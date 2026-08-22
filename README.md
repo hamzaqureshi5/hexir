@@ -110,20 +110,32 @@ hexir --compile-to=kernel -placement=hexir.linear=cuda,hexir.relu=cpu
 
 ## Building
 
-Needs a build of LLVM with MLIR.
+Hexir needs an **unreleased** LLVM: it uses the new-style
+`OpTy::create(builder, ...)` MLIR builders, so no packaged MLIR can build it.
+The exact commit is pinned as a submodule.
 
 ```bash
-git clone git@github.com:hamzaqureshi5/hexir.git && cd hexir
-mkdir -p build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release \
-         -DLLVM_DIR=/path/to/llvm-project/build/lib/cmake/llvm \
-         -DMLIR_DIR=/path/to/llvm-project/build/lib/cmake/mlir
-make -j$(nproc)
+git clone --recurse-submodules git@github.com:hamzaqureshi5/hexir.git && cd hexir
+scripts/build-llvm.sh                 # 30-90 min, ~10 GB, once
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+ninja -C build
 ```
 
-For the GPU path, LLVM must be built with `-DLLVM_TARGETS_TO_BUILD="X86;NVPTX"`,
-and a CUDA toolkit must be installed. Full commands are in
-[`docs/llvm-cuda-build.txt`](docs/llvm-cuda-build.txt).
+`scripts/build-llvm.sh` configures the pinned commit the way hexir needs, and
+enables the CUDA pieces only if `nvcc` is on PATH, so a CPU-only machine still
+gets a working compiler. CMake then finds that build on its own.
+
+Already have a suitable LLVM? Point at it instead and skip the submodule:
+
+```bash
+cmake -S . -B build -DLLVM_DIR=/path/to/llvm/lib/cmake/llvm \
+                    -DMLIR_DIR=/path/to/llvm/lib/cmake/mlir
+```
+
+Either way the configure prints which LLVM it chose. See
+[`third_party/README.md`](third_party/README.md) for the pin and how to move it,
+and [`docs/llvm-cuda-build.txt`](docs/llvm-cuda-build.txt) for the CUDA install
+notes.
 
 ## Testing
 
