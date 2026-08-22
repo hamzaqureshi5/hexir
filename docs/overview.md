@@ -65,7 +65,7 @@ pass runs a second time, as a safety net for anything unlabelled.
 
 Once each operation is a kernel, the compiler hands you a file.
 
-`-emit=hxb` serializes the program into a module and stops. `hexir-run` loads
+`--compile-to=artifact` serializes the program into a module and stops. `hexir-run` loads
 that file later; it links no MLIR and no LLVM, so it is tens of kilobytes
 instead of hundreds of megabytes.
 

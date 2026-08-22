@@ -1,20 +1,21 @@
 # The pass pipeline
 
-All pass ordering lives in one function: `buildHexirPipeline` in
-`compiler/Pipelines/Pipelines.cpp`. It adds passes and returns as soon as it reaches
-the stage you asked for, and the driver runs the whole thing once.
+All pass ordering lives in `compiler/Pipelines/Pipelines.cpp`, one function per
+phase, called from `buildHexirPipeline`. It adds passes and returns as soon as it
+reaches the phase you asked for, and the driver runs the whole thing once.
 
 ```mermaid
 flowchart TD
-    S["canonicalize, shape inference, CSE"]
-    S --> T{"which -emit?"}
+    S["canonicalize, shape inference, CSE<br/>graph"]
+    S --> P["partition<br/>place"]
+    P --> T{"which route?"}
 
-    T -->|mlir-tir, hxb| K1["partition"]
-    K1 --> K2["lower-to-tir"]
-    K2 --> KE(["stop"])
+    T -->|kernel, device, artifact| K2["lower-to-tir"]
+    K2 --> KD{"device?"}
+    KD -->|"kernel, artifact"| KE(["stop"])
+    KD -->|device| KG["hextir to gpu.module<br/>then NVVM"]
 
-    T -->|linalg and beyond| L1["partition"]
-    L1 --> L2["lower-to-linalg"]
+    T -->|"linalg, frozen"| L2["lower-to-linalg"]
     L2 --> L3["partition again<br/>safety net"]
     L3 --> L6["bufferize<br/>tensors become memrefs"]
     L6 --> L7["cuda ops to gpu.launch"]
@@ -25,15 +26,27 @@ flowchart TD
 
 ## Why the order matters
 
-The `Stage` enum is ordered, and the pipeline gates work with `>=` on it. Move
-an entry and you change which passes run. Two consequences worth knowing:
+`Phase` is only *partly* ordered, and knowing which parts is the difference
+between a working stage and one that prints the wrong IR.
 
-* `Stage::TIR` sits *below* `Stage::Linalg`. That keeps
-  `stage >= Stage::Linalg` false for `-emit=mlir-tir`, which is what makes the
-  kernel level a branch off the pipeline rather than a step along it.
-* Anything at or past `Stage::GPU` runs GPU lowering, including `llvm` and
-  `hxb`. That is deliberate: a `.hxb` artifact of a CUDA-placed program has to
-  embed the compiled kernel.
+`input → graph → place` is a genuine sequence, and the pipeline gates it with
+`>=`. Below `place` it **forks**, and choosing a route is a branch, not a
+comparison.
+
+That distinction is not pedantry. The old `Stage` enum claimed to be one ordered
+list gated entirely with `>=`, and an affine stage ended up sitting below the
+linalg stage as a result: asking for it returned before adding any pass, so it
+printed the graph unchanged and looked like a stage that simply had nothing
+interesting to show. Both it and the pass behind it have since been deleted.
+
+Two consequences worth knowing:
+
+* `artifact` stops at the kernel level rather than running the device passes. It
+  has to: the command list is built from kernel-level IR, so `ModuleSerializer`
+  compiles device code on a *clone* and leaves this module alone.
+* `device` stops at NVVM rather than going on to a binary. That is the IR
+  `ptxas` is handed, and it means the device path can be inspected — and tested
+  — on a machine with no CUDA toolkit.
 
 ## The passes
 
@@ -70,7 +83,7 @@ creates.
 
 ### Placement is visible without a detour
 
-`-emit=mlir-hetero` prints linalg ops carrying their `device` attribute. Mirror
+`--compile-to=linalg` prints linalg ops carrying their `device` attribute. Mirror
 `ls_cpu` / `ls_gpu` dialects used to exist so placement appeared in the op name;
 they were removed because the round trip through them rebuilt each op and lost
 its destination operand and attributes.

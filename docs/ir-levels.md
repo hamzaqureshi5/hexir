@@ -122,7 +122,7 @@ error: 'hexir.call_tir' op expected @matmul to take 3 buffers
 ## A third pair, now gone
 
 There used to be `ls_cpu` and `ls_gpu` dialects: mirror-image `add`, `mul`,
-`matmul` and `relu` ops that existed only so `-emit=mlir-hetero` showed
+`matmul` and `relu` ops that existed only so the linalg dump showed
 placement in the op *name*. They were removed.
 
 The pipeline materialized linalg ops into them and converted them straight
@@ -130,5 +130,5 @@ back, which sounds like a no-op but was lossy: rebuilding each op discarded its
 destination operand and every attribute except `device`. One conversion pattern
 was missing entirely, so any program using `hexir.add` failed to compile.
 
-`-emit=mlir-hetero` now prints the real linalg op with its `device` attribute,
+`--compile-to=linalg` now prints the real linalg op with its `device` attribute,
 which says strictly more than a renamed one did.

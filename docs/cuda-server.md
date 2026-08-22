@@ -46,23 +46,24 @@ Notes:
 cd build
 
 # 1. CPU baseline — must print: 8.000000 17.000000 / 12.000000 14.000000
-./hexir -emit=hxb -o cpu.hxb && ./hexir-run cpu.hxb
+./hexir --compile-to=artifact -o cpu.hxb && ./hexir-run cpu.hxb
 
 # 2. Inspect GPU IR (works even before toolchain is verified)
-./hexir -emit=mlir-gpu                  # expect: gpu.launch {device="cuda"}
+./hexir --compile-to=device -placement=hexir.linear=cuda   # expect: gpu.module, nvvm.read.ptx.sreg
 
 # 3. Full LLVM lowering with kernel compilation (first toolkit-dependent step)
-./hexir -emit=mlir-llvm 2>&1 | grep -E "gpu.binary|mgpu" | head
+./hexir --compile-to=artifact -o m.hxb -placement=hexir.linear=cuda
+python3 ../tools/hxb-dump.py m.hxb | grep -E "device image"   # expect: real bytes, not a descriptor
 # expect: gpu.binary blob + mgpuModuleLoad/mgpuLaunchKernel calls
 
 # 4. Heterogeneous execution: matmul on A6000, relu on CPU  ← the goal
-./hexir -emit=hxb -o m.hxb && ./hexir-run m.hxb
+./hexir --compile-to=artifact -o m.hxb && ./hexir-run m.hxb
 # expected output (identical to CPU baseline):
 # 8.000000 17.000000
 # 12.000000 14.000000
 
 # 5. Everything on GPU (relu via the generic elementwise kernel)
-./hexir -emit=hxb -o gpu.hxb -placement=hexir.linear=cuda,hexir.relu=cuda && ./hexir-run --device=cuda gpu.hxb
+./hexir --compile-to=artifact -o gpu.hxb -placement=hexir.linear=cuda,hexir.relu=cuda && ./hexir-run --device=cuda gpu.hxb
 
 # 6. Full test suite — the 3 CUDA-gated tests un-skip automatically
 #    (lit detects nvcc on PATH and enables the 'cuda' feature)
@@ -72,10 +73,10 @@ make check-hexir       # expect: 9/9 pass, 0 unsupported
 ## Placement cheat-sheet
 
 ```bash
-./hexir -emit=hxb -o m.hxb                                   # everything on the CPU (default)
-./hexir -emit=hxb -o cpu.hxb && ./hexir-run cpu.hxb                # all CPU
-./hexir -emit=hxb -o gpu.hxb -placement=hexir.linear=cuda,hexir.relu=cuda && ./hexir-run --device=cuda gpu.hxb                  # all GPU
-./hexir -emit=hxb -o cpu.hxb && ./hexir-run cpu.hxb,hexir.relu=gpu # swapped
+./hexir --compile-to=artifact -o m.hxb                       # everything on the CPU (default)
+./hexir --compile-to=artifact -o cpu.hxb && ./hexir-run cpu.hxb                # all CPU
+./hexir --compile-to=artifact -o gpu.hxb -placement=hexir.linear=cuda,hexir.relu=cuda && ./hexir-run --device=cuda gpu.hxb                  # all GPU
+./hexir --compile-to=artifact -o swap.hxb -placement=hexir.linear=cpu,hexir.relu=cuda  # swapped
 ```
 
 Defaults live in `src/TargetInfo.cpp` (`opPreferred_`); `gpu` ≡ `cuda`.

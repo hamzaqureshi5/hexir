@@ -48,7 +48,7 @@ hexir.print %r : tensor<2x2xf64>
 ## Compile, then run
 
 ```bash
-hexir -emit=hxb -o model.hxb                 # compile to a file
+hexir --compile-to=artifact -o model.hxb     # compile to a file
 hexir-run model.hxb                          # run it later, no compiler present
 ```
 
@@ -58,7 +58,7 @@ CUBIN and embedded in the file, so the runtime loads and launches it with no
 compiler in the process:
 
 ```console
-$ hexir -emit=hxb -o gpu.hxb -placement=hexir.linear=cuda
+$ hexir --compile-to=artifact -o gpu.hxb -placement=hexir.linear=cuda
 $ hexir-run --device=cuda gpu.hxb
 device        : cuda (NVIDIA GeForce GTX 1660 Ti)
 --
@@ -95,18 +95,17 @@ for learning:
 
 | Command | Shows |
 | --- | --- |
-| `-emit=mlir` | the graph you wrote |
-| `-emit=mlir-tir` | each operation as a kernel |
-| `-emit=mlir-linalg` | loops on tensors |
-| `-emit=mlir-hetero` | placement, as `device` attributes |
-| `-emit=mlir-gpu` | CUDA kernels as `gpu.launch` |
-| `-emit=llvm` | LLVM IR |
-| `-emit=hxb` | a deployable module |
+| `--compile-to=input` | the graph you wrote |
+| `--compile-to=graph` | after graph optimization |
+| `--compile-to=place` | placement, as `device` attributes |
+| `--compile-to=kernel` | each operation as a kernel |
+| `--compile-to=device` | CUDA kernels as `gpu.module`, lowered to NVVM |
+| `--compile-to=artifact` | a deployable module |
 
 Move an operation between devices without recompiling the compiler:
 
 ```bash
-hexir -emit=mlir-tir -placement=hexir.linear=cuda,hexir.relu=cpu
+hexir --compile-to=kernel -placement=hexir.linear=cuda,hexir.relu=cpu
 ```
 
 ## Building

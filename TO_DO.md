@@ -30,7 +30,7 @@ Nothing produces `hexir.func`. `compiler/Support/Builder.cpp` creates
 `func::FuncOp`, every test writes `func.func`, and `grep -rl 'hexir.func'
 compiler/test/` finds nothing. So that nested pass manager matches zero
 operations and all four passes are skipped. Two identical `hexir.constant` ops
-survive `-emit=mlir -opt` untouched, which is the proof.
+survive `--compile-to=input -opt` untouched, which is the proof.
 
 - [ ] Nest on `func::FuncOp`, or run at module scope, and add a test that CSE
       actually merges two identical constants.
@@ -78,7 +78,7 @@ directory needs an `add_subdirectory` in its parent.
 
 Insertion point matters: before `createLowerToLinalgPass()` for graph work,
 between `createPartitionPass()` and `createLowerToTIRPass()` for kernel work on
-the `-emit=mlir-tir` / `hxb` path.
+the `kernel` / `artifact` path.
 
 ### C. A conversion that crosses dialects
 
@@ -215,9 +215,10 @@ See §1D: these are serializer and runtime changes, not passes.
 An optimization you cannot see is one you cannot keep.
 
 ```bash
-hexir -emit=mlir -opt prog.mlir                 # graph rewrites
-hexir -emit=mlir-tir prog.mlir                  # the kernel and its schedule
-hexir -emit=mlir-linalg --print-ir-after-all    # which pass changed what
+hexir --compile-to=graph prog.mlir              # graph rewrites
+hexir --compile-to=kernel prog.mlir             # the kernel and its schedule
+hexir --compile-to=device prog.mlir             # the NVVM a .hxb embeds
+hexir --compile-to=kernel --print-ir-after-all  # which pass changed what
 bench/run.sh                                    # end to end, against cuBLAS
 tools/hxb-dump.py m.hxb                         # sections, commands, rodata
 ```

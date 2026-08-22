@@ -27,7 +27,7 @@ With no input file, the compiler builds a small program in C++ (a 2x2 matrix
 multiply) and compiles that. It is the quickest way to check your build works:
 
 ```bash
-./build/hexir -emit=hxb -o hello.hxb
+./build/hexir --compile-to=artifact -o hello.hxb
 ./build/hexir-run hello.hxb
 ```
 
@@ -54,7 +54,7 @@ func.func @main() {
 Then:
 
 ```bash
-./build/hexir -emit=hxb -o mine.hxb mine.mlir
+./build/hexir --compile-to=artifact -o mine.hxb mine.mlir
 ./build/hexir-run mine.hxb
 ```
 
@@ -67,11 +67,11 @@ Every stage of the pipeline can be printed. This is the most useful thing about
 Hexir for learning:
 
 ```bash
-./build/hexir -emit=mlir mine.mlir           # the graph you wrote
-./build/hexir -emit=mlir-tir mine.mlir       # each op as a kernel
-./build/hexir -emit=mlir-linalg mine.mlir    # loops on tensors
-./build/hexir -emit=mlir-gpu mine.mlir       # GPU kernels
-./build/hexir -emit=llvm mine.mlir           # LLVM IR
+./build/hexir --compile-to=input mine.mlir    # the graph you wrote
+./build/hexir --compile-to=kernel mine.mlir   # each op as a kernel
+./build/hexir --compile-to=place mine.mlir    # where each op runs
+./build/hexir --compile-to=device mine.mlir   # GPU kernels, as NVVM
+./build/hexir --compile-to=artifact -o mine.hxb mine.mlir   # a module
 ```
 
 ## Choose where things run
@@ -79,7 +79,7 @@ Hexir for learning:
 By default everything runs on the CPU. Move an operation with `-placement`:
 
 ```bash
-./build/hexir -emit=mlir-tir -placement=hexir.linear=cuda mine.mlir
+./build/hexir --compile-to=kernel -placement=hexir.linear=cuda mine.mlir
 ```
 
 Look at the loops in the output. On the CPU they are `parallel`; on CUDA they
@@ -88,7 +88,7 @@ are `thread_binding` and bound to a GPU axis.
 You can move more than one at a time:
 
 ```bash
-./build/hexir -emit=mlir-tir -placement=hexir.linear=cuda,hexir.relu=cpu mine.mlir
+./build/hexir --compile-to=kernel -placement=hexir.linear=cuda,hexir.relu=cpu mine.mlir
 ```
 
 ## Run it on the GPU
@@ -97,7 +97,7 @@ With a CUDA toolkit installed and LLVM built for NVPTX, a GPU-placed kernel
 compiles to a CUBIN that gets embedded in the module:
 
 ```bash
-./build/hexir -emit=hxb -o gpu.hxb -placement=hexir.linear=cuda mine.mlir
+./build/hexir --compile-to=artifact -o gpu.hxb -placement=hexir.linear=cuda mine.mlir
 ./build/hexir-run --device=cuda gpu.hxb
 ```
 
@@ -122,7 +122,7 @@ the same device, or run the CPU and GPU versions separately.
 ## Ship a file instead
 
 ```bash
-./build/hexir -emit=hxb -o model.hxb mine.mlir
+./build/hexir --compile-to=artifact -o model.hxb mine.mlir
 ./build/hexir-run model.hxb
 ```
 

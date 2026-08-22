@@ -6,7 +6,7 @@ entire point. Deploying a compiled program should not mean shipping the
 compiler.
 
 ```bash
-./build/hexir -emit=hxb -o model.hxb mine.mlir   # compiler, ~230 MB
+./build/hexir --compile-to=artifact -o model.hxb mine.mlir  # compiler, ~230 MB
 ./build/hexir-run model.hxb                      # runtime, ~18 KB
 ```
 
@@ -124,12 +124,12 @@ avoid.
 :::{note}
 **A cuda kernel is real device code; a cpu kernel is still a description.**
 
-For a kernel placed on cuda, `-emit=hxb` lowers it `hextir` → `gpu` → NVVM →
+For a kernel placed on cuda, `--compile-to=artifact` lowers it `hextir` → `gpu` → NVVM →
 CUBIN and embeds the image. The module is then self-contained, and running it
 needs a GPU and no compiler:
 
 ```
-$ hexir -emit=hxb -o gpu.hxb -placement=hexir.linear=cuda
+$ hexir --compile-to=artifact -o gpu.hxb -placement=hexir.linear=cuda
 $ hexir-run --device=cuda gpu.hxb
 device        : cuda (NVIDIA GeForce GTX 1660 Ti)
 --

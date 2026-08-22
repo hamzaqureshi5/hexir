@@ -40,7 +40,7 @@ the whole unlock, and everything below assumes it.
 
 ## Phases
 
-Six phases, each a directory, each with an `-emit=` stage so it stays
+Six phases, each a directory, each with a `--compile-to=` phase so it stays
 inspectable. The rule that prevents clutter: **a pass in phase N may not need
 knowledge that only phase N+1 has.**
 
@@ -53,6 +53,11 @@ knowledge that only phase N+1 has.**
 | 4 schedule | hextir → hextir | loop kinds, tiles, bindings, staging |
 | 5 device lowering | hextir → gpu / scf | NVVM, CUBIN, LLVM |
 | 6 serialize | — | memory plan, command list, runtime |
+
+The CLI now names these directly: `--compile-to=input|graph|place|kernel|device|artifact`,
+with `-emit=` reduced to the output format. `schedule` and `host` are missing
+from that list on purpose — the passes behind them do not exist yet, and a phase
+that prints the wrong IR is the bug the restructuring removed.
 
 Phase 1 sits *before* placement, and phase 2 annotates groups rather than
 individual operations. Fusing after placement means a fused group can straddle
@@ -154,7 +159,7 @@ is a test for each.* Days, not weeks.
 - [ ] `hexir-lower-to-tir` emits unscheduled kernels
 - [ ] `hextir-schedule` reproduces exactly what the lowering used to produce
 
-*Exit: `-emit=mlir-tir` output is byte-identical to before, and every existing
+*Exit: `--compile-to=kernel` output is byte-identical to before, and every existing
 test passes unmodified.*
 
 The highest-leverage milestone and the safest one, because "output unchanged" is
