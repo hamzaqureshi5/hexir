@@ -1,0 +1,6 @@
+set(LLVM_TARGET_DEFINITIONS NinjaOps.td)
+mlir_tablegen(NinjaOps.h.inc -gen-op-decls)
+mlir_tablegen(NinjaOps.cpp.inc -gen-op-defs)
+mlir_tablegen(NinjaDialect.h.inc -gen-dialect-decls -dialect=ninja)
+mlir_tablegen(NinjaDialect.cpp.inc -gen-dialect-defs -dialect=ninja)
+add_public_tablegen_target(NinjaOpsIncGen)

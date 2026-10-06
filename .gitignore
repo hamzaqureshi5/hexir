@@ -1,17 +1,3 @@
-scripts/mlp_mlir
-*.o
-*.out
-*.ll
-*.bc
-*.ptx
 build/
-scripts/mlp_mlir
-
-# Sphinx build output
-docs/_build/
-
-# Local guidance for AI assistants; not part of the project
+.cache/
 CLAUDE.md
-
-# Benchmark run output
-bench/work/
