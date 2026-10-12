@@ -1,0 +1,12 @@
+--- !FileInfo:
+  filepath: "/home/user/hexir/include/ninja/NinjaOps.td"
+  includes: "/home/user/hexir/include/ninja;/home/user/llvm-project/llvm/include;/home/user/llvm-project/build/include;/home/user/llvm-project/mlir/include;/home/user/llvm-project/build/tools/mlir/include;/home/user/hexir/include;/home/user/hexir/include"
+--- !FileInfo:
+  filepath: "/home/user/hexir/include/ninja/NinjaOps.td"
+  includes: "/home/user/hexir/include/ninja;/home/user/llvm-project/llvm/include;/home/user/llvm-project/build/include;/home/user/llvm-project/mlir/include;/home/user/llvm-project/build/tools/mlir/include;/home/user/hexir/include;/home/user/hexir/include"
+--- !FileInfo:
+  filepath: "/home/user/hexir/include/ninja/NinjaOps.td"
+  includes: "/home/user/hexir/include/ninja;/home/user/llvm-project/llvm/include;/home/user/llvm-project/build/include;/home/user/llvm-project/mlir/include;/home/user/llvm-project/build/tools/mlir/include;/home/user/hexir/include;/home/user/hexir/include"
+--- !FileInfo:
+  filepath: "/home/user/hexir/include/ninja/NinjaOps.td"
+  includes: "/home/user/hexir/include/ninja;/home/user/llvm-project/llvm/include;/home/user/llvm-project/build/include;/home/user/llvm-project/mlir/include;/home/user/llvm-project/build/tools/mlir/include;/home/user/hexir/include;/home/user/hexir/include"

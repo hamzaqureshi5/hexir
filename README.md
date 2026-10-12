@@ -3,8 +3,8 @@
 A small MLIR dialect for learning TableGen and ODS (Operation Definition
 Specification). Each op in `include/ninja/NinjaOps.td` shows one idea.
 
-**Start with [docs/ods-guide.md](docs/ods-guide.md)**: every ODS concept in simple terms, plus
-a list of exercises that cover them all.
+**Start with the guide in [docs/ods/](docs/ods/README.md)**: 16 chapters covering every ODS
+concept, including every MLIR trait, each with a tested example, exercises and solutions.
 
 | Op | Teaches |
 | --- | --- |
